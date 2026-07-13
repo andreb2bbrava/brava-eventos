@@ -1,10 +1,11 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { podeEditarEvento } from "@/lib/permissoes";
+import AdminShell from "@/app/components/AdminShell";
+import AdminEventTabs from "@/app/components/AdminEventTabs";
 
 type EventoResumo = {
   id: number;
@@ -24,13 +25,30 @@ type ListaEvento = {
 type ParticipanteLista = {
   id: number;
   nome: string;
-  sobrenome: string | null;
-  telefone: string | null;
   whatsapp: string | null;
   email: string | null;
   presente: boolean;
   entrada_confirmada_em: string | null;
 };
+
+function normalizarNome(valor: string) {
+  return valor
+    .trim()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/\s+/g, " ");
+}
+
+function rotuloTipoLista(tipoLista: string | null) {
+  return tipoLista === "vip" ? "Lista Completa" : "Lista Simples";
+}
+
+function debugLog(...args: unknown[]) {
+  if (process.env.NODE_ENV !== "production") {
+    console.log(...args);
+  }
+}
 
 export default function ParticipantesDaListaPage() {
   const params = useParams();
@@ -53,28 +71,29 @@ export default function ParticipantesDaListaPage() {
   const [loading, setLoading] = useState(true);
   const [acessoNegado, setAcessoNegado] = useState(false);
   const [mensagemAcesso, setMensagemAcesso] = useState("");
+  const [roleUsuario, setRoleUsuario] = useState<"super_admin" | "produtor" | "staff" | null>(null);
 
   const [evento, setEvento] = useState<EventoResumo | null>(null);
   const [lista, setLista] = useState<ListaEvento | null>(null);
   const [participantes, setParticipantes] = useState<ParticipanteLista[]>([]);
+  const [buscaParticipantes, setBuscaParticipantes] = useState("");
 
   const [nomesEmMassa, setNomesEmMassa] = useState("");
   const [salvandoSimples, setSalvandoSimples] = useState(false);
   const [salvandoVip, setSalvandoVip] = useState(false);
+  const [mensagemCadastro, setMensagemCadastro] = useState("");
+  const [erroCadastro, setErroCadastro] = useState(false);
 
   const [nome, setNome] = useState("");
-  const [sobrenome, setSobrenome] = useState("");
   const [telefone, setTelefone] = useState("");
   const [email, setEmail] = useState("");
   const [dataNascimento, setDataNascimento] = useState("");
   const [sexo, setSexo] = useState("");
-  const [cidade, setCidade] = useState("");
-  const [observacoes, setObservacoes] = useState("");
 
   const carregarParticipantes = useCallback(async (eventoId: number, listaIdAtual: number) => {
     const { data: participantesData } = await supabase
       .from("participantes")
-      .select("id, nome, sobrenome, telefone, whatsapp, email, presente, entrada_confirmada_em")
+      .select("id, nome, whatsapp, email, presente, entrada_confirmada_em")
       .eq("evento_id", eventoId)
       .eq("lista_id", listaIdAtual)
       .order("id", { ascending: false });
@@ -85,7 +104,16 @@ export default function ParticipantesDaListaPage() {
   }, []);
 
   const carregarDados = useCallback(async () => {
-    if (!slug || !Number.isFinite(listaId) || listaId <= 0) {
+    debugLog("PARAMS LISTA", { slug, listaId });
+
+    if (!slug) {
+      setAcessoNegado(true);
+      setMensagemAcesso("Evento não encontrado.");
+      setLoading(false);
+      return;
+    }
+
+    if (!Number.isFinite(listaId) || listaId <= 0) {
       setAcessoNegado(true);
       setMensagemAcesso("Lista inválida.");
       setLoading(false);
@@ -94,25 +122,113 @@ export default function ParticipantesDaListaPage() {
 
     setLoading(true);
 
-    const { autorizado, evento: eventoData, erro } = await podeEditarEvento(slug);
+    const { data: eventoData, error: erroEvento } = await supabase
+      .from("eventos")
+      .select("*")
+      .eq("slug", slug)
+      .single();
 
-    if (!autorizado || !eventoData) {
+    debugLog("EVENTO ENCONTRADO", eventoData);
+    debugLog("ERRO EVENTO", erroEvento);
+
+    if (erroEvento || !eventoData) {
       setAcessoNegado(true);
-      setMensagemAcesso(erro || "Você não possui permissão para gerenciar participantes desta lista.");
+      setMensagemAcesso("Evento não encontrado.");
       setLoading(false);
       return;
     }
 
-    const { data: listaData, error: listaError } = await supabase
+    const { data: listaData, error: erroLista } = await supabase
       .from("listas_evento")
-      .select("id, evento_id, nome, descricao, regra, tipo_lista")
-      .eq("id", listaId)
-      .eq("evento_id", eventoData.id)
-      .maybeSingle();
+      .select("*")
+      .eq("id", Number(listaId))
+      .single();
 
-    if (listaError || !listaData) {
+    debugLog("LISTA ENCONTRADA", listaData);
+    debugLog("ERRO LISTA", erroLista);
+
+    if (erroLista) {
+      const erroPermissaoLista = erroLista.code === "42501" || erroLista.code === "PGRST301";
       setAcessoNegado(true);
-      setMensagemAcesso("Lista não encontrada para este evento.");
+      setMensagemAcesso(erroPermissaoLista ? "Você não possui permissão para acessar esta lista." : "Lista não encontrada.");
+      setLoading(false);
+      return;
+    }
+
+    if (!listaData) {
+      setAcessoNegado(true);
+      setMensagemAcesso("Lista não encontrada.");
+      setLoading(false);
+      return;
+    }
+
+    if (Number(listaData.evento_id) !== Number(eventoData.id)) {
+      setAcessoNegado(true);
+      setMensagemAcesso("Esta lista não pertence a este evento.");
+      setLoading(false);
+      return;
+    }
+
+    const {
+      data: { user },
+      error: erroAuth,
+    } = await supabase.auth.getUser();
+
+    debugLog("USUARIO", user?.id);
+
+    if (erroAuth || !user?.id) {
+      setAcessoNegado(true);
+      setMensagemAcesso("Você não possui permissão para acessar esta lista.");
+      setLoading(false);
+      return;
+    }
+
+    const { data: usuarioData, error: usuarioError } = await supabase
+      .from("usuarios")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+
+    const usuario = usuarioData;
+    debugLog("ROLE", usuario?.role);
+
+    const role = (usuarioData?.role as "super_admin" | "produtor" | "staff" | null) ?? null;
+    setRoleUsuario(role);
+
+    if (usuarioError || !role) {
+      setAcessoNegado(true);
+      setMensagemAcesso("Você não possui permissão para acessar esta lista.");
+      setLoading(false);
+      return;
+    }
+
+    let autorizado = role === "super_admin";
+
+    if (!autorizado && role === "produtor") {
+      const { data: vinculacaoProdutor, error: vinculacaoProdutorError } = await supabase
+        .from("evento_produtores")
+        .select("id")
+        .eq("evento_id", eventoData.id)
+        .eq("usuario_id", user.id)
+        .maybeSingle();
+
+      autorizado = !vinculacaoProdutorError && !!vinculacaoProdutor;
+    }
+
+    if (!autorizado && role === "staff") {
+      const { data: vinculacaoStaff, error: vinculacaoStaffError } = await supabase
+        .from("evento_staff")
+        .select("id")
+        .eq("evento_id", eventoData.id)
+        .eq("usuario_id", user.id)
+        .maybeSingle();
+
+      autorizado = !vinculacaoStaffError && !!vinculacaoStaff;
+    }
+
+    if (!autorizado) {
+      setAcessoNegado(true);
+      setMensagemAcesso("Você não possui permissão para acessar esta lista.");
       setLoading(false);
       return;
     }
@@ -135,10 +251,23 @@ export default function ParticipantesDaListaPage() {
     carregarDados();
   }, [carregarDados]);
 
+  const podeCadastrarParticipante = roleUsuario === "super_admin" || roleUsuario === "produtor";
+
   async function importarParticipantesSimples(e: FormEvent) {
     e.preventDefault();
 
+    setMensagemCadastro("");
+    setErroCadastro(false);
+
     if (!evento || !lista) {
+      setErroCadastro(true);
+      setMensagemCadastro("Evento ou lista não identificados. Recarregue a página e tente novamente.");
+      return;
+    }
+
+    if (!podeCadastrarParticipante) {
+      setErroCadastro(true);
+      setMensagemCadastro("Você não possui permissão para cadastrar participantes nesta lista.");
       return;
     }
 
@@ -148,105 +277,178 @@ export default function ParticipantesDaListaPage() {
       .filter(Boolean);
 
     if (nomes.length === 0) {
-      alert("Digite pelo menos um nome para importar.");
+      setErroCadastro(true);
+      setMensagemCadastro("Digite pelo menos um nome para importar.");
       return;
     }
 
     setSalvandoSimples(true);
 
-    const payload = nomes.map((nomeLinha) => ({
-      evento_id: evento.id,
-      lista_id: lista.id,
-      nome: nomeLinha,
-      presente: false,
-    }));
+    const nomesExistentes = new Set(participantes.map((participante) => normalizarNome(participante.nome || "")));
+    const nomesNovos = new Set<string>();
+    const payload: Array<{ evento_id: number; lista_id: number; nome: string; presente: boolean }> = [];
+    let duplicadosIgnorados = 0;
+
+    nomes.forEach((nomeLinha) => {
+      const nomeNormalizado = normalizarNome(nomeLinha);
+
+      if (!nomeNormalizado || nomesExistentes.has(nomeNormalizado) || nomesNovos.has(nomeNormalizado)) {
+        duplicadosIgnorados += 1;
+        return;
+      }
+
+      nomesNovos.add(nomeNormalizado);
+      payload.push({
+        evento_id: evento.id,
+        lista_id: lista.id,
+        nome: nomeLinha,
+        presente: false,
+      });
+    });
+
+    if (payload.length === 0) {
+      setSalvandoSimples(false);
+      setErroCadastro(true);
+      setMensagemCadastro("Este nome já está cadastrado nesta lista.");
+      return;
+    }
+
+    console.log("PAYLOAD PARTICIPANTES", payload);
 
     const { error } = await supabase.from("participantes").insert(payload);
 
     setSalvandoSimples(false);
 
     if (error) {
-      console.log(error);
-      alert("Erro ao importar participantes desta lista.");
-      return;
-    }
+  console.error("ERRO REAL AO IMPORTAR PARTICIPANTES:", error);
+  console.error("MESSAGE:", error.message);
+  console.error("DETAILS:", error.details);
+  console.error("HINT:", error.hint);
+  console.error("CODE:", error.code);
+  console.error("PAYLOAD ENVIADO:", payload);
+
+  setErroCadastro(true);
+  setMensagemCadastro(
+    `Erro real: ${error.message || "Erro ao importar participantes desta lista."}`
+  );
+
+  return;
+}
 
     setNomesEmMassa("");
     await carregarParticipantes(evento.id, lista.id);
-    alert("Participantes importados com sucesso!");
+    setErroCadastro(false);
+    setMensagemCadastro(`${payload.length} participantes importados. ${duplicadosIgnorados} duplicados ignorados.`);
   }
 
-  async function adicionarParticipanteVip(e: FormEvent) {
+  async function adicionarParticipanteCompleto(e: FormEvent) {
     e.preventDefault();
 
+    setMensagemCadastro("");
+    setErroCadastro(false);
+
     if (!evento || !lista) {
+      setErroCadastro(true);
+      setMensagemCadastro("Evento ou lista não identificados. Recarregue a página e tente novamente.");
+      return;
+    }
+
+    if (!podeCadastrarParticipante) {
+      setErroCadastro(true);
+      setMensagemCadastro("Você não possui permissão para cadastrar participantes nesta lista.");
       return;
     }
 
     if (!nome.trim()) {
-      alert("O nome é obrigatório para a lista VIP.");
+      setErroCadastro(true);
+      setMensagemCadastro("O nome é obrigatório para a Lista Completa.");
+      return;
+    }
+
+    const nomeNormalizado = normalizarNome(nome);
+    const participanteDuplicado = participantes.some((participante) => normalizarNome(participante.nome || "") === nomeNormalizado);
+
+    if (participanteDuplicado) {
+      setErroCadastro(true);
+      setMensagemCadastro("Este nome já está cadastrado nesta lista.");
       return;
     }
 
     setSalvandoVip(true);
 
-    const payload = {
-      evento_id: evento.id,
-      lista_id: lista.id,
-      nome: nome.trim(),
-      sobrenome: sobrenome.trim() || null,
-      telefone: telefone.trim() || null,
-      whatsapp: telefone.trim() || null,
-      email: email.trim() || null,
-      data_nascimento: dataNascimento || null,
-      sexo: sexo.trim() || null,
-      cidade: cidade.trim() || null,
-      observacoes: observacoes.trim() || null,
-      presente: false,
-    };
+const payload = {
+  evento_id: evento.id,
+  lista_id: lista.id,
+  nome: nome.trim(),
+  whatsapp: telefone.trim() || null,
+  email: email.trim() || null,
+  presente: false,
+};
+
+    console.log("PAYLOAD PARTICIPANTES", [payload]);
 
     const { error } = await supabase.from("participantes").insert([payload]);
 
     setSalvandoVip(false);
 
     if (error) {
-      console.log(error);
-      alert("Erro ao adicionar participante VIP.");
+      console.error("Erro ao importar participantes:", error);
+      console.error("Erro participante message:", error?.message);
+      console.error("Erro participante details:", error?.details);
+      console.error("Erro participante hint:", error?.hint);
+      console.error("Erro participante code:", error?.code);
+      console.error("Erro participante JSON:", JSON.stringify(error, null, 2));
+      console.error("Payload participante:", payload);
+      setErroCadastro(true);
+      setMensagemCadastro("Erro ao adicionar participante da Lista Completa.");
       return;
     }
 
     setNome("");
-    setSobrenome("");
     setTelefone("");
     setEmail("");
     setDataNascimento("");
     setSexo("");
-    setCidade("");
-    setObservacoes("");
 
     await carregarParticipantes(evento.id, lista.id);
-    alert("Participante adicionado com sucesso!");
+    setErroCadastro(false);
+    setMensagemCadastro("Cadastro realizado com sucesso!");
   }
+
+  function nomeCompleto(participante: ParticipanteLista) {
+    return participante.nome || "";
+  }
+
+  function telefoneExibicao(participante: ParticipanteLista) {
+  return participante.whatsapp || "-";
+}
+
+  const participantesFiltrados = useMemo(() => {
+    const termo = buscaParticipantes.trim().toLowerCase();
+
+    if (!termo) {
+      return participantes;
+    }
+
+    return participantes.filter((participante) => {
+      const nomeBase = nomeCompleto(participante).toLowerCase();
+      const emailBase = (participante.email || "").toLowerCase();
+      const telefoneBase = telefoneExibicao(participante).toLowerCase();
+      return nomeBase.includes(termo) || emailBase.includes(termo) || telefoneBase.includes(termo);
+    });
+  }, [buscaParticipantes, participantes]);
 
   const totalCadastrados = participantes.length;
   const presentes = participantes.filter((item) => item.presente).length;
   const pendentes = totalCadastrados - presentes;
 
-  function nomeCompleto(participante: ParticipanteLista) {
-    const nomeBase = participante.nome || "";
-    const sobrenomeBase = participante.sobrenome || "";
-    return `${nomeBase} ${sobrenomeBase}`.trim();
-  }
-
-  function telefoneExibicao(participante: ParticipanteLista) {
-    return participante.telefone || participante.whatsapp || "-";
-  }
-
   if (acessoNegado) {
+    const tituloErroAcesso = mensagemAcesso === "Você não possui permissão para acessar esta lista." ? "Acesso negado" : "Lista não encontrada";
+
     return (
       <main className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center p-6">
         <div className="max-w-xl text-center">
-          <h1 className="text-3xl font-bold">Acesso negado</h1>
+          <h1 className="text-3xl font-bold">{tituloErroAcesso}</h1>
           <p className="text-slate-600 mt-3">{mensagemAcesso || "Você não possui permissão para acessar esta lista."}</p>
           <Link
             href="/admin"
@@ -268,25 +470,30 @@ export default function ParticipantesDaListaPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900 p-4 sm:p-6 overflow-x-hidden">
-      <div className="max-w-5xl mx-auto space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-slate-500 text-sm">Evento: {evento.nome}</p>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-blue-900 break-words">Participantes da Lista</h1>
-          </div>
-
-          <Link
-            href={`/admin/eventos/${evento.slug}/editar`}
-            className="bg-blue-100 hover:bg-blue-200 text-blue-900 px-5 py-3 rounded-2xl font-bold min-h-11 text-center"
-          >
-            Voltar para edição
-          </Link>
-        </div>
+    <AdminShell
+      role={roleUsuario}
+      title="Convidados da Lista"
+      subtitle={`Gerencie a lista ${lista.nome} com contexto completo do evento ${evento.nome}.`}
+      breadcrumbs={[
+        { label: "Inicio", href: "/admin" },
+        { label: "Meus Eventos", href: "/admin#todos-eventos" },
+        { label: evento.nome, href: `/admin/eventos/${evento.slug}` },
+        { label: "Listas", href: `/admin/eventos/${evento.slug}#listas-evento` },
+        { label: lista.nome },
+      ]}
+      backLink={{ href: `/admin/eventos/${evento.slug}#listas-evento`, label: "Voltar para Listas" }}
+      aside={{
+        title: "Gestao da lista",
+        description:
+          "Nesta tela voce importa nomes, cadastra VIPs individualmente e acompanha quem ja entrou para manter a operacao da porta organizada.",
+      }}
+    >
+      <div className="space-y-6">
+        <AdminEventTabs slug={evento.slug} current="convidados" />
 
         <section className="bg-white border border-blue-100 rounded-3xl p-6 space-y-2 shadow-sm">
           <p className="text-sm text-slate-600">Nome da lista: <span className="text-slate-900 font-semibold">{lista.nome}</span></p>
-          <p className="text-sm text-slate-600">Tipo da lista: <span className="text-slate-900 font-semibold uppercase">{lista.tipo_lista || "simples"}</span></p>
+          <p className="text-sm text-slate-600">Tipo da lista: <span className="text-slate-900 font-semibold">{rotuloTipoLista(lista.tipo_lista)}</span></p>
           <p className="text-sm text-slate-600">Descrição: <span className="text-slate-900">{lista.descricao || "-"}</span></p>
           <p className="text-sm text-slate-600">Regra: <span className="text-slate-900">{lista.regra || "-"}</span></p>
         </section>
@@ -306,9 +513,38 @@ export default function ParticipantesDaListaPage() {
           </div>
         </section>
 
+        <section className="bg-white border border-blue-100 rounded-3xl p-5 shadow-sm">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-blue-900">Buscar convidados</h2>
+              <p className="mt-1 text-sm text-slate-500">Filtre por nome, e-mail ou telefone para localizar rapidamente um participante.</p>
+            </div>
+
+            <input
+              type="text"
+              value={buscaParticipantes}
+              onChange={(e) => setBuscaParticipantes(e.target.value)}
+              placeholder="Buscar participante"
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 md:max-w-md"
+            />
+          </div>
+        </section>
+
         {lista.tipo_lista === "simples" ? (
           <section className="bg-white border border-blue-100 rounded-3xl p-6 shadow-sm">
             <h2 className="text-2xl font-bold text-blue-900 mb-4">Cadastro em massa</h2>
+
+            {!podeCadastrarParticipante ? (
+              <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700">
+                Seu perfil não pode cadastrar participantes nesta lista.
+              </p>
+            ) : null}
+
+            {mensagemCadastro ? (
+              <p className={`mb-4 rounded-xl px-4 py-3 text-sm font-semibold ${erroCadastro ? "border border-red-200 bg-red-50 text-red-700" : "border border-green-200 bg-green-50 text-green-700"}`}>
+                {mensagemCadastro}
+              </p>
+            ) : null}
 
             <form onSubmit={importarParticipantesSimples} className="space-y-4">
               <textarea
@@ -316,11 +552,12 @@ export default function ParticipantesDaListaPage() {
                 onChange={(e) => setNomesEmMassa(e.target.value)}
                 placeholder="Digite um nome por linha"
                 className="w-full p-4 rounded-xl bg-white text-black h-48"
+                disabled={!podeCadastrarParticipante || salvandoSimples}
               />
 
               <button
                 type="submit"
-                disabled={salvandoSimples}
+                disabled={!podeCadastrarParticipante || salvandoSimples}
                 className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 text-white px-6 py-3 rounded-2xl font-bold min-h-11"
               >
                 {salvandoSimples ? "IMPORTANDO..." : "Importar Participantes"}
@@ -329,23 +566,28 @@ export default function ParticipantesDaListaPage() {
           </section>
         ) : (
           <section className="bg-white border border-blue-100 rounded-3xl p-6 shadow-sm">
-            <h2 className="text-2xl font-bold text-blue-900 mb-4">Cadastro individual VIP</h2>
+            <h2 className="text-2xl font-bold text-blue-900 mb-4">Cadastro individual da Lista Completa</h2>
 
-            <form onSubmit={adicionarParticipanteVip} className="grid gap-4 md:grid-cols-2">
+            {!podeCadastrarParticipante ? (
+              <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700">
+                Seu perfil não pode cadastrar participantes nesta lista.
+              </p>
+            ) : null}
+
+            {mensagemCadastro ? (
+              <p className={`mb-4 rounded-xl px-4 py-3 text-sm font-semibold ${erroCadastro ? "border border-red-200 bg-red-50 text-red-700" : "border border-green-200 bg-green-50 text-green-700"}`}>
+                {mensagemCadastro}
+              </p>
+            ) : null}
+
+            <form onSubmit={adicionarParticipanteCompleto} className="grid gap-4 md:grid-cols-2">
               <input
                 type="text"
                 value={nome}
                 onChange={(e) => setNome(e.target.value)}
                 placeholder="Nome *"
                 className="w-full p-4 rounded-xl bg-white text-black"
-              />
-
-              <input
-                type="text"
-                value={sobrenome}
-                onChange={(e) => setSobrenome(e.target.value)}
-                placeholder="Sobrenome"
-                className="w-full p-4 rounded-xl bg-white text-black"
+                disabled={!podeCadastrarParticipante || salvandoVip}
               />
 
               <input
@@ -354,6 +596,7 @@ export default function ParticipantesDaListaPage() {
                 onChange={(e) => setTelefone(e.target.value)}
                 placeholder="Telefone / WhatsApp"
                 className="w-full p-4 rounded-xl bg-white text-black"
+                disabled={!podeCadastrarParticipante || salvandoVip}
               />
 
               <input
@@ -362,6 +605,7 @@ export default function ParticipantesDaListaPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="Email"
                 className="w-full p-4 rounded-xl bg-white text-black"
+                disabled={!podeCadastrarParticipante || salvandoVip}
               />
 
               <input
@@ -370,6 +614,7 @@ export default function ParticipantesDaListaPage() {
                 onChange={(e) => setDataNascimento(e.target.value)}
                 placeholder="Data de nascimento"
                 className="w-full p-4 rounded-xl bg-white text-black"
+                disabled={!podeCadastrarParticipante || salvandoVip}
               />
 
               <input
@@ -378,27 +623,13 @@ export default function ParticipantesDaListaPage() {
                 onChange={(e) => setSexo(e.target.value)}
                 placeholder="Sexo"
                 className="w-full p-4 rounded-xl bg-white text-black"
-              />
-
-              <input
-                type="text"
-                value={cidade}
-                onChange={(e) => setCidade(e.target.value)}
-                placeholder="Cidade"
-                className="w-full p-4 rounded-xl bg-white text-black"
-              />
-
-              <textarea
-                value={observacoes}
-                onChange={(e) => setObservacoes(e.target.value)}
-                placeholder="Observações"
-                className="w-full p-4 rounded-xl bg-white text-black md:col-span-2 h-28"
+                disabled={!podeCadastrarParticipante || salvandoVip}
               />
 
               <div className="md:col-span-2">
                 <button
                   type="submit"
-                  disabled={salvandoVip}
+                  disabled={!podeCadastrarParticipante || salvandoVip}
                   className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 text-white px-6 py-3 rounded-2xl font-bold min-h-11"
                 >
                   {salvandoVip ? "ADICIONANDO..." : "Adicionar Participante"}
@@ -411,11 +642,11 @@ export default function ParticipantesDaListaPage() {
         <section className="bg-white border border-blue-100 rounded-3xl p-6 shadow-sm">
           <h2 className="text-2xl font-bold text-blue-900 mb-4">Participantes da Lista</h2>
 
-          {participantes.length === 0 ? (
+          {participantesFiltrados.length === 0 ? (
             <p className="text-sm text-slate-500">Nenhum participante cadastrado nesta lista.</p>
           ) : (
             <div className="space-y-3">
-              {participantes.map((participante) => (
+              {participantesFiltrados.map((participante) => (
                 <div
                   key={participante.id}
                   className="rounded-2xl border border-slate-200 bg-white p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
@@ -445,6 +676,6 @@ export default function ParticipantesDaListaPage() {
           )}
         </section>
       </div>
-    </main>
+    </AdminShell>
   );
 }

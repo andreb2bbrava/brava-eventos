@@ -3,44 +3,34 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import AdminShell from "@/app/components/AdminShell";
+import { gerarSlugUnicoEvento } from "@/lib/slug";
+
+type RoleUsuario = "super_admin" | "produtor" | "staff";
+
+function separarDataHora(dataHora: string) {
+  if (!dataHora) {
+    return { data: "", hora: "" };
+  }
+
+  const [data, hora] = dataHora.split("T");
+  return { data: data || "", hora: hora || "" };
+}
 
 export default function CriarEventoPage() {
-
-  const [nome, setNome] =
-    useState("");
-
-  const [dataEvento,
-    setDataEvento] =
-    useState("");
-
-  const [horaEvento,
-    setHoraEvento] =
-    useState("");
-
-  const [localEvento,
-    setLocalEvento] =
-    useState("");
-
-  const [mapsUrl,
-    setMapsUrl] =
-    useState("");
-
-  const [banner,
-    setBanner] =
-    useState<File | null>(null);
-
-  const [bannerPosicao,
-    setBannerPosicao] =
-    useState("center");
-
-  const [tipoLista,
-    setTipoLista] =
-    useState("simples");
-
-  const [acessoNegado, setAcessoNegado] =
-    useState(false);
-
   const router = useRouter();
+
+  const [nome, setNome] = useState("");
+  const [descricao, setDescricao] = useState("");
+  const [inicioEvento, setInicioEvento] = useState("");
+  const [terminoEvento, setTerminoEvento] = useState("");
+  const [localEvento, setLocalEvento] = useState("");
+  const [mapsUrl, setMapsUrl] = useState("");
+  const [banner, setBanner] = useState<File | null>(null);
+  const [salvando, setSalvando] = useState(false);
+  const [mensagemSucesso, setMensagemSucesso] = useState("");
+  const [acessoNegado, setAcessoNegado] = useState(false);
+  const [roleUsuario, setRoleUsuario] = useState<RoleUsuario | null>(null);
 
   useEffect(() => {
     async function verificarPermissao() {
@@ -59,6 +49,8 @@ export default function CriarEventoPage() {
         .eq("id", user.id)
         .single();
 
+      setRoleUsuario((usuarioData?.role as RoleUsuario | null) ?? null);
+
       if (!usuarioData || (usuarioData.role !== "super_admin" && usuarioData.role !== "produtor")) {
         setAcessoNegado(true);
         return;
@@ -70,18 +62,16 @@ export default function CriarEventoPage() {
     verificarPermissao();
   }, [router]);
 
-  async function criarEvento(
-    e: React.FormEvent
-  ) {
-
+  async function criarEvento(e: React.FormEvent) {
     e.preventDefault();
 
-    if (!banner) {
+    if (!nome.trim()) {
+      alert("Preencha o titulo do evento.");
+      return;
+    }
 
-      alert(
-        "Selecione um banner."
-      );
-
+    if (!inicioEvento) {
+      alert("Informe o inicio do evento.");
       return;
     }
 
@@ -90,124 +80,70 @@ export default function CriarEventoPage() {
     } = await supabase.auth.getUser();
 
     if (!user) {
-
-      alert(
-        "Usuário não autenticado."
-      );
-
+      alert("Usuario nao autenticado.");
       return;
     }
 
-    const slug =
-      nome
-        .toLowerCase()
-        .replaceAll(" ", "-");
+    setSalvando(true);
 
-    const nomeArquivo =
-      `${Date.now()}-${banner.name}`;
+    const slug = await gerarSlugUnicoEvento({
+      supabase,
+      titulo: nome,
+    });
 
-    const { error: erroUpload } =
-      await supabase.storage
-        .from("banners")
-        .upload(
-          nomeArquivo,
-          banner
-        );
-
-    if (erroUpload) {
-
-      console.log(
-        erroUpload
-      );
-
-      alert(
-        "Erro ao subir banner."
-      );
-
+    if (!slug) {
+      alert("Nao foi possivel gerar o link do evento. Verifique o titulo.");
+      setSalvando(false);
       return;
     }
 
-    const { data } =
-      supabase.storage
+    let bannerUrl: string | null = null;
+
+    if (banner) {
+      const nomeArquivo = `${Date.now()}-${banner.name}`;
+      const { error: erroUpload } = await supabase.storage
         .from("banners")
-        .getPublicUrl(
-          nomeArquivo
-        );
+        .upload(nomeArquivo, banner);
 
-    const bannerUrl =
-      data.publicUrl;
+      if (erroUpload) {
+        console.log(erroUpload);
+        alert("Erro ao subir banner.");
+        setSalvando(false);
+        return;
+      }
 
-    const { error } =
-      await supabase
-        .from("eventos")
-        .insert([
+      const { data } = supabase.storage.from("banners").getPublicUrl(nomeArquivo);
+      bannerUrl = data.publicUrl;
+    }
 
-          {
-            nome,
+    const inicio = separarDataHora(inicioEvento);
+    const termino = separarDataHora(terminoEvento);
 
-            slug,
+    const payload = {
+      nome: nome.trim(),
+      slug,
+      criador_id: user.id,
+      descricao: descricao.trim() || null,
+      inicio_evento: inicioEvento ? new Date(inicioEvento).toISOString() : null,
+      termino_evento: terminoEvento ? new Date(terminoEvento).toISOString() : null,
+      data_evento: inicio.data || null,
+      hora_evento: inicio.hora || null,
+      local_evento: localEvento.trim() || null,
+      maps_url: mapsUrl.trim() || null,
+      banner_url: bannerUrl,
+    };
 
-            criador_id:
-              user.id,
-
-            data_evento:
-              dataEvento,
-
-            hora_evento:
-              horaEvento,
-
-            local_evento:
-              localEvento,
-
-            maps_url:
-              mapsUrl,
-
-            banner_url:
-              bannerUrl,
-
-            banner_posicao:
-              bannerPosicao,
-
-            tipo_lista:
-              tipoLista,
-          },
-
-        ]);
+    const { error } = await supabase.from("eventos").insert([payload]);
 
     if (error) {
-
       console.log(error);
-
-      alert(
-        "Erro ao criar evento"
-      );
-
+      alert("Erro ao criar evento.");
+      setSalvando(false);
       return;
     }
 
-    alert(
-      "Evento criado com sucesso!"
-    );
-
-    setNome("");
-
-    setDataEvento("");
-
-    setHoraEvento("");
-
-    setLocalEvento("");
-
-    setMapsUrl("");
-
-    setBanner(null);
-
-    setBannerPosicao(
-      "center"
-    );
-
-    setTipoLista(
-      "simples"
-    );
+    setMensagemSucesso("Evento criado com sucesso. Agora crie suas listas.");
+    router.push(`/admin/eventos/${slug}?criado=1`);
   }
 
   if (acessoNegado) {
@@ -215,182 +151,123 @@ export default function CriarEventoPage() {
       <main className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center px-6">
         <div className="text-center max-w-xl">
           <h1 className="text-3xl font-bold">Acesso negado</h1>
-          <p className="mt-3 text-slate-600">
-            Seu perfil permite apenas acesso de check-in para eventos.
-          </p>
+          <p className="mt-3 text-slate-600">Seu perfil permite apenas acesso de check-in para eventos.</p>
         </div>
       </main>
     );
   }
 
   return (
+    <AdminShell
+      role={roleUsuario}
+      title="Novo Evento"
+      subtitle="Crie o evento, salve os dados principais e siga direto para a Central do Evento para montar suas listas."
+      breadcrumbs={[
+        { label: "Inicio", href: "/admin" },
+        { label: "Meus Eventos", href: "/admin#todos-eventos" },
+        { label: "Novo Evento" },
+      ]}
+      backLink={{ href: "/admin#todos-eventos", label: "Voltar para Meus Eventos" }}
+      aside={{
+        title: "Fluxo recomendado",
+        description:
+          "Depois de criar o evento, voce sera levado para a Central do Evento. A partir de la voce pode criar listas simples ou completas e preparar a operacao.",
+      }}
+    >
+      <div className="max-w-3xl rounded-[2rem] border border-white/70 bg-white p-6 shadow-[0_20px_60px_rgba(148,163,184,0.16)] sm:p-8">
+        {mensagemSucesso ? (
+          <div className="mb-6 rounded-2xl border border-green-200 bg-green-50 px-4 py-4 text-sm font-semibold text-green-700">
+            {mensagemSucesso}
+          </div>
+        ) : null}
 
-    <main className="min-h-screen bg-slate-50 text-slate-900 p-4 sm:p-6 overflow-x-hidden">
-
-      <div className="max-w-2xl mx-auto bg-white border border-blue-100 rounded-3xl p-5 sm:p-8 shadow-sm">
-
-        <h1 className="text-3xl sm:text-5xl font-extrabold text-blue-900 text-center mb-6 sm:mb-8 break-words">
-          Criar Evento
-        </h1>
-
-        <form
-          onSubmit={
-            criarEvento
-          }
-          className="space-y-5"
-        >
-
-          <input
-            type="text"
-            placeholder="Nome do Evento"
-            value={nome}
-            onChange={(e) =>
-              setNome(
-                e.target.value
-              )
-            }
-            className="w-full p-4 rounded-xl bg-white text-slate-900 border border-slate-200 text-base"
-          />
-
-          <input
-            type="date"
-            value={dataEvento}
-            onChange={(e) =>
-              setDataEvento(
-                e.target.value
-              )
-            }
-            className="w-full p-4 rounded-xl bg-white text-slate-900 border border-slate-200 text-base"
-          />
-
-          <input
-            type="time"
-            value={horaEvento}
-            onChange={(e) =>
-              setHoraEvento(
-                e.target.value
-              )
-            }
-            className="w-full p-4 rounded-xl bg-white text-slate-900 border border-slate-200 text-base"
-          />
-
-          <input
-            type="text"
-            placeholder="Local do Evento"
-            value={localEvento}
-            onChange={(e) =>
-              setLocalEvento(
-                e.target.value
-              )
-            }
-            className="w-full p-4 rounded-xl bg-white text-slate-900 border border-slate-200 text-base"
-          />
-
-          <input
-            type="text"
-            placeholder="Link Google Maps"
-            value={mapsUrl}
-            onChange={(e) =>
-              setMapsUrl(
-                e.target.value
-              )
-            }
-            className="w-full p-4 rounded-xl bg-white text-slate-900 border border-slate-200 text-base"
-          />
-
+        <form onSubmit={criarEvento} className="space-y-6">
           <div>
-
-            <p className="mb-3 text-blue-900 font-semibold">
-              Tipo de Lista
-            </p>
-
-            <select
-              value={tipoLista}
-              onChange={(e) =>
-                setTipoLista(
-                  e.target.value
-                )
-              }
-              className="w-full p-4 rounded-xl bg-white text-slate-900 border border-slate-200 text-base"
-            >
-
-              <option value="simples">
-                Lista Simples
-              </option>
-
-              <option value="vip">
-                Lista VIP
-              </option>
-
-            </select>
-
+            <label className="mb-2 block text-sm font-bold text-blue-900">Titulo</label>
+            <input
+              type="text"
+              placeholder="Ex: Brazuca 2026"
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-slate-900"
+            />
           </div>
 
           <div>
+            <label className="mb-2 block text-sm font-bold text-blue-900">Descricao do evento</label>
+            <textarea
+              placeholder="Descreva o evento, atracoes, regras e informacoes importantes."
+              value={descricao}
+              onChange={(e) => setDescricao(e.target.value)}
+              className="h-36 w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-slate-900"
+            />
+          </div>
 
-            <p className="mb-3 text-blue-900 font-semibold">
-              Banner do Evento
-            </p>
+          <div className="grid gap-6 md:grid-cols-2">
+            <div>
+              <label className="mb-2 block text-sm font-bold text-blue-900">Inicio do evento</label>
+              <input
+                type="datetime-local"
+                value={inicioEvento}
+                onChange={(e) => setInicioEvento(e.target.value)}
+                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-slate-900"
+              />
+            </div>
 
+            <div>
+              <label className="mb-2 block text-sm font-bold text-blue-900">Termino do evento</label>
+              <input
+                type="datetime-local"
+                value={terminoEvento}
+                onChange={(e) => setTerminoEvento(e.target.value)}
+                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-slate-900"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-bold text-blue-900">Local</label>
+            <input
+              type="text"
+              placeholder="Ex: Caza Brava"
+              value={localEvento}
+              onChange={(e) => setLocalEvento(e.target.value)}
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-slate-900"
+            />
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-bold text-blue-900">Link do Google Maps</label>
+            <input
+              type="url"
+              placeholder="Cole aqui o link do Google Maps"
+              value={mapsUrl}
+              onChange={(e) => setMapsUrl(e.target.value)}
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-slate-900"
+            />
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-bold text-blue-900">Banner do evento</label>
+            <p className="text-sm text-slate-500">Tamanho recomendado: 1920 × 600 px</p>
+            <p className="mb-3 text-sm text-slate-500">Formatos: JPG ou PNG</p>
             <input
               type="file"
-              accept="image/*"
-              onChange={(e) =>
-                setBanner(
-                  e.target.files?.[0] ||
-                    null
-                )
-              }
-              className="w-full p-4 rounded-xl bg-white text-slate-900 border border-slate-200 text-base"
+              accept="image/png,image/jpeg"
+              onChange={(e) => setBanner(e.target.files?.[0] || null)}
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-slate-900"
             />
-
-          </div>
-
-          <div>
-
-            <p className="mb-3 text-blue-900 font-semibold">
-              Posição do Banner
-            </p>
-
-            <select
-              value={
-                bannerPosicao
-              }
-              onChange={(e) =>
-                setBannerPosicao(
-                  e.target.value
-                )
-              }
-              className="w-full p-4 rounded-xl bg-white text-slate-900 border border-slate-200 text-base"
-            >
-
-              <option value="top">
-                Topo
-              </option>
-
-              <option value="center">
-                Centro
-              </option>
-
-              <option value="bottom">
-                Baixo
-              </option>
-
-            </select>
-
           </div>
 
           <button
             type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-500 text-white transition p-4 sm:p-5 rounded-xl font-extrabold text-base sm:text-lg min-h-11"
+            disabled={salvando}
+            className="w-full rounded-2xl bg-blue-600 px-6 py-4 text-base font-extrabold text-white transition hover:bg-blue-500 disabled:bg-slate-300 min-h-11"
           >
-            CRIAR EVENTO 🚀
+            {salvando ? "CRIANDO..." : "CRIAR EVENTO"}
           </button>
-
         </form>
-
       </div>
-
-    </main>
+    </AdminShell>
   );
 }

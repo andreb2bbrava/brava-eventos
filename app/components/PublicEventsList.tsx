@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { supabase } from "@/lib/supabase";
 
 type EventoPublico = {
   id: number;
@@ -28,16 +27,21 @@ export default function PublicEventsList({ hideHeader }: PublicEventsListProps) 
     async function carregarEventos() {
       setLoading(true);
 
-      const { data, error } = await supabase
-        .from("eventos")
-        .select("id, nome, slug, data_evento, local_evento, tipo_lista, banner_url, banner_posicao")
-        .order("data_evento", { ascending: true });
+      const response = await fetch("/api/eventos-publicos", {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
 
-      if (!error && data) {
-        setEventos(data as EventoPublico[]);
-      } else {
+      if (!response.ok) {
         setEventos([]);
+        setLoading(false);
+        return;
       }
+
+      const result = await response.json();
+      setEventos((result?.eventos || []) as EventoPublico[]);
 
       setLoading(false);
     }
@@ -132,7 +136,7 @@ export default function PublicEventsList({ hideHeader }: PublicEventsListProps) 
           </div>
         ) : eventosFiltrados.length === 0 ? (
           <div className="rounded-3xl border border-blue-200 bg-white p-10 text-center text-slate-500">
-            Nenhum evento encontrado.
+            Nenhum evento futuro disponivel no momento.
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">

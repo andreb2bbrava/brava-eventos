@@ -1,0 +1,1635 @@
+diff --git a/app/admin/eventos/[slug]/editar/page.tsx b/app/admin/eventos/[slug]/editar/page.tsx
+index aef6c9c..a54cee9 100644
+--- a/app/admin/eventos/[slug]/editar/page.tsx
++++ b/app/admin/eventos/[slug]/editar/page.tsx
+@@ -2,9 +2,11 @@
+ 
+ import { FormEvent, useCallback, useEffect, useState } from "react";
+ import { useRouter, useParams } from "next/navigation";
+-import Link from "next/link";
+ import { supabase } from "@/lib/supabase";
+ import { podeEditarEvento } from "@/lib/permissoes";
++import AdminShell from "@/app/components/AdminShell";
++import AdminEventTabs from "@/app/components/AdminEventTabs";
++import { gerarSlugUnicoEvento } from "@/lib/slug";
+ 
+ type Produtor = {
+   id: string | number;
+@@ -16,25 +18,21 @@ type Staff = {
+   email: string;
+ };
+ 
+-type ListaEvento = {
+-  id: number;
+-  evento_id: number;
+-  nome: string;
+-  descricao: string | null;
+-  regra: string | null;
+-  visibilidade: string | null;
+-  valor: number | null;
+-  prazo: string | null;
+-  responsavel: string | null;
+-  slug?: string | null;
+-  ordem?: number | null;
+-  cor?: string | null;
+-  categoria?: string | null;
+-  origem_campanha?: string | null;
+-  tipo_lista?: string | null;
+-  responsavel_usuario_id?: string | null;
+-  ativa: boolean;
+-};
++function separarDataHora(dataHora: string | null) {
++  if (!dataHora) {
++    return { data: "", hora: "" };
++  }
++
++  const dataObj = new Date(dataHora);
++
++  if (Number.isNaN(dataObj.getTime())) {
++    return { data: "", hora: "" };
++  }
++
++  const data = dataObj.toISOString().slice(0, 10);
++  const hora = dataObj.toISOString().slice(11, 16);
++  return { data, hora };
++}
+ 
+ export default function EditarEventoPage() {
+ 
+@@ -50,6 +48,8 @@ export default function EditarEventoPage() {
+   const [loading, setLoading] =
+     useState(true);
+ 
++  const [roleUsuario, setRoleUsuario] = useState<"super_admin" | "produtor" | "staff" | null>(null);
++
+   const [salvando, setSalvando] =
+     useState(false);
+ 
+@@ -68,6 +68,15 @@ export default function EditarEventoPage() {
+   const [nome, setNome] =
+     useState("");
+ 
++  const [descricao, setDescricao] =
++    useState("");
++
++  const [inicioEvento, setInicioEvento] =
++    useState("");
++
++  const [terminoEvento, setTerminoEvento] =
++    useState("");
++
+   const [dataEvento, setDataEvento] =
+     useState("");
+ 
+@@ -80,11 +89,9 @@ export default function EditarEventoPage() {
+   const [mapsUrl, setMapsUrl] =
+     useState("");
+ 
+-  const [bannerPosicao, setBannerPosicao] =
+-    useState("center");
++  const [bannerUrl, setBannerUrl] = useState("");
+ 
+-  const [tipoLista, setTipoLista] =
+-    useState("simples");
++  const [bannerArquivo, setBannerArquivo] = useState<File | null>(null);
+ 
+   const [produtores, setProdutores] =
+     useState<Produtor[]>([]);
+@@ -99,88 +106,39 @@ export default function EditarEventoPage() {
+ 
+   const [staffSelecionado, setStaffSelecionado] =
+     useState<Array<string | number>>([]);
+-  const [listasEvento, setListasEvento] =
+-    useState<ListaEvento[]>([]);
+-
+-  const [listaSelecionadaId,
+-    setListaSelecionadaId] =
+-    useState<number | null>(null);
+-
+-  const [listaNome,
+-    setListaNome] =
+-    useState("");
+-
+-  const [listaSlug, setListaSlug] = useState("");
+-
+-  const [listaOrdem, setListaOrdem] = useState("");
+-
+-  const [listaCor, setListaCor] = useState("");
+-
+-  const [listaCategoria, setListaCategoria] = useState("personalizada");
+-
+-  const [listaOrigemCampanha, setListaOrigemCampanha] = useState("");
+-
+-  const [listaDescricao,
+-    setListaDescricao] =
+-    useState("");
+-
+-  const [listaRegra,
+-    setListaRegra] =
+-    useState("");
+-
+-  const [listaVisibilidade,
+-    setListaVisibilidade] =
+-    useState("publica");
+-
+-  const [listaTipo,
+-    setListaTipo] =
+-    useState("simples");
+-
+-  const [listaValor,
+-    setListaValor] =
+-    useState("");
+-
+-  const [listaPrazo,
+-    setListaPrazo] =
+-    useState("");
+-
+-  const [listaResponsavel,
+-    setListaResponsavel] =
+-    useState("");
+-
+-  const [listaAtiva,
+-    setListaAtiva] =
+-    useState(true);
+-
+-  const [listaSalvando,
+-    setListaSalvando] =
+-    useState(false);
+-
+-  const [listaMensagem,
+-    setListaMensagem] =
+-    useState("");
+ 
+   const carregarEvento = useCallback(async () => {
+     setLoading(true);
+ 
+-    const { autorizado, evento, erro } =
++    const { autorizado, evento, erro, role } =
+       await podeEditarEvento(slug);
+ 
+     if (!autorizado || !evento) {
+       setAcessoNegado(true);
+       setMensagemAcesso(erro || "Você não possui permissão para editar este evento.");
++      setRoleUsuario((role as "super_admin" | "produtor" | "staff" | null) ?? null);
+       setLoading(false);
+       return;
+     }
+ 
+     setAcessoNegado(false);
+     setMensagemAcesso("");
++    setRoleUsuario((role as "super_admin" | "produtor" | "staff" | null) ?? null);
+     setEventoId(evento.id);
+ 
+-    setSlugEvento(evento.slug);
++    setSlugEvento(evento.slug || "");
+ 
+     setNome(evento.nome);
+ 
++    setDescricao(evento.descricao || "");
++
++    const inicioCalculado = evento.inicio_evento || (evento.data_evento && evento.hora_evento ? `${evento.data_evento}T${evento.hora_evento}` : null);
++    const partesInicio = separarDataHora(inicioCalculado);
++    setInicioEvento(partesInicio.data && partesInicio.hora ? `${partesInicio.data}T${partesInicio.hora}` : "");
++
++    const partesTermino = separarDataHora(evento.termino_evento || null);
++    setTerminoEvento(partesTermino.data && partesTermino.hora ? `${partesTermino.data}T${partesTermino.hora}` : "");
++
+     setDataEvento(
+       evento.data_evento
+     );
+@@ -197,15 +155,7 @@ export default function EditarEventoPage() {
+       evento.maps_url || ""
+     );
+ 
+-    setBannerPosicao(
+-      evento.banner_posicao ||
+-      "center"
+-    );
+-
+-    setTipoLista(
+-      evento.tipo_lista ||
+-      "simples"
+-    );
++    setBannerUrl(evento.banner_url || "");
+ 
+     const {
+       data: produtoresData,
+@@ -275,16 +225,6 @@ export default function EditarEventoPage() {
+       );
+     }
+ 
+-    const { data: listasData } = await supabase
+-      .from("listas_evento")
+-      .select("*")
+-      .eq("evento_id", evento.id)
+-      .order("id", { ascending: false });
+-
+-    if (listasData) {
+-      setListasEvento(listasData as ListaEvento[]);
+-    }
+-
+     setLoading(false);
+   }, [slug]);
+ 
+@@ -349,6 +289,45 @@ export default function EditarEventoPage() {
+ 
+     setSalvando(true);
+ 
++    let proximoSlugEvento = (slugEvento || "").trim();
++
++    if (!proximoSlugEvento) {
++      const slugGerado = await gerarSlugUnicoEvento({
++        supabase,
++        titulo: nome,
++        eventoIdAtual: eventoId,
++      });
++
++      if (!slugGerado) {
++        alert("Nao foi possivel gerar o link do evento. Verifique o titulo.");
++        setSalvando(false);
++        return;
++      }
++
++      proximoSlugEvento = slugGerado;
++    }
++
++    let proximaBannerUrl = bannerUrl || null;
++
++    if (bannerArquivo) {
++      const nomeArquivo = `${Date.now()}-${bannerArquivo.name}`;
++      const { error: erroUpload } = await supabase.storage
++        .from("banners")
++        .upload(nomeArquivo, bannerArquivo);
++
++      if (erroUpload) {
++        console.log(erroUpload);
++        alert("Erro ao subir banner do evento.");
++        setSalvando(false);
++        return;
++      }
++
++      const { data } = supabase.storage.from("banners").getPublicUrl(nomeArquivo);
++      proximaBannerUrl = data.publicUrl;
++    }
++
++    const partesInicio = inicioEvento ? separarDataHora(new Date(inicioEvento).toISOString()) : { data: dataEvento, hora: horaEvento };
++
+     const { error } =
+       await supabase
+         .from("eventos")
+@@ -356,11 +335,19 @@ export default function EditarEventoPage() {
+ 
+           nome,
+ 
++          slug: proximoSlugEvento,
++
++          descricao: descricao.trim() || null,
++
++          inicio_evento: inicioEvento ? new Date(inicioEvento).toISOString() : null,
++
++          termino_evento: terminoEvento ? new Date(terminoEvento).toISOString() : null,
++
+           data_evento:
+-            dataEvento,
++            partesInicio.data || null,
+ 
+           hora_evento:
+-            horaEvento,
++            partesInicio.hora || null,
+ 
+           local_evento:
+             localEvento,
+@@ -368,11 +355,8 @@ export default function EditarEventoPage() {
+           maps_url:
+             mapsUrl,
+ 
+-          banner_posicao:
+-            bannerPosicao,
+-
+-          tipo_lista:
+-            tipoLista,
++          banner_url:
++            proximaBannerUrl,
+ 
+         })
+         .eq(
+@@ -475,217 +459,49 @@ export default function EditarEventoPage() {
+ 
+     setSalvando(false);
+ 
++    setSlugEvento(proximoSlugEvento);
++
+     alert(
+       "Evento atualizado com sucesso!"
+     );
+ 
+     router.push(
+-      `/admin/eventos/${slugEvento}`
++      `/admin/eventos/${proximoSlugEvento}`
+     );
+ 
+   }
+ 
+-  function limparFormularioLista() {
+-    setListaSelecionadaId(null);
+-    setListaNome("");
+-    setListaSlug("");
+-    setListaDescricao("");
+-    setListaRegra("");
+-    setListaVisibilidade("publica");
+-    setListaTipo("simples");
+-    setListaValor("");
+-    setListaPrazo("");
+-    setListaResponsavel("");
+-    setListaOrdem("");
+-    setListaCor("");
+-    setListaCategoria("personalizada");
+-    setListaOrigemCampanha("");
+-    setListaAtiva(true);
+-    setListaMensagem("");
+-  }
+-
+-  function editarLista(lista: ListaEvento) {
+-    setListaSelecionadaId(lista.id);
+-    setListaNome(lista.nome);
+-    setListaDescricao(lista.descricao || "");
+-    setListaRegra(lista.regra || "");
+-    setListaVisibilidade(lista.visibilidade || "publica");
+-    setListaValor(lista.valor !== null ? String(lista.valor) : "");
+-    setListaPrazo(lista.prazo || "");
+-    setListaResponsavel(lista.responsavel || "");
+-    setListaAtiva(lista.ativa);
+-    setListaSlug(lista.slug || "");
+-    setListaOrdem(lista.ordem !== undefined && lista.ordem !== null ? String(lista.ordem) : "");
+-    setListaCor(lista.cor || "");
+-    setListaCategoria(lista.categoria || "personalizada");
+-    setListaOrigemCampanha(lista.origem_campanha || "");
+-    setListaTipo(lista.tipo_lista || "simples");
+-    setListaMensagem("Editando lista selecionada");
+-  }
+-
+-  async function salvarLista(
+-    e: FormEvent
+-  ) {
+-    e.preventDefault();
+-
+-    if (!eventoId) {
+-      return;
+-    }
+-
+-    setListaSalvando(true);
+-    setListaMensagem("");
+-
+-    const payload = {
+-      evento_id: eventoId,
+-      nome: listaNome,
+-      slug: listaSlug || null,
+-      descricao: listaDescricao || null,
+-      regra: listaRegra || null,
+-      visibilidade: listaVisibilidade || null,
+-      tipo_lista: listaTipo || 'simples',
+-      valor: listaValor ? Number(listaValor) : null,
+-      prazo: listaPrazo || null,
+-      responsavel: listaResponsavel || null,
+-      ordem: listaOrdem ? Number(listaOrdem) : 0,
+-      cor: listaCor || null,
+-      categoria: listaCategoria || "personalizada",
+-      origem_campanha: listaOrigemCampanha || null,
+-      responsavel_usuario_id: null,
+-      ativa: listaAtiva,
+-    };
+-
+-    let error;
+-
+-    // ensure slug exists: generate from name if empty
+-    function generateSlug(text: string) {
+-      return text
+-        .toLowerCase()
+-        .normalize("NFKD")
+-        .replace(/\p{Diacritic}/gu, "")
+-        .replace(/[^a-z0-9]+/g, "-")
+-        .replace(/^-+|-+$/g, "")
+-        .slice(0, 75);
+-    }
+-
+-    async function ensureUniqueSlug(base: string) {
+-      let candidate = base;
+-      let suffix = 1;
+-      while (true) {
+-        const { data } = await supabase
+-          .from("listas_evento")
+-          .select("id")
+-          .eq("evento_id", eventoId)
+-          .eq("slug", candidate)
+-          .limit(1);
+-
+-        if (!data || data.length === 0) return candidate;
+-
+-        // if updating existing and found same record id, it's fine
+-        if (listaSelecionadaId && data[0].id === listaSelecionadaId) return candidate;
+-
+-        candidate = `${base}-${suffix}`;
+-        suffix += 1;
+-      }
+-    }
+-
+-    // prepare slug and enforce uniqueness within event
+-    let finalSlug = listaSlug && listaSlug.trim() ? listaSlug.trim() : generateSlug(listaNome || "");
+-    if (!finalSlug) {
+-      finalSlug = generateSlug(listaNome || "lista");
+-    }
+-    finalSlug = await ensureUniqueSlug(finalSlug);
+-
+-    payload.slug = finalSlug;
+-
+-    if (listaSelecionadaId) {
+-      const result = await supabase
+-        .from("listas_evento")
+-        .update(payload)
+-        .eq("id", listaSelecionadaId);
+-
+-      error = result.error;
+-    } else {
+-      const result = await supabase
+-        .from("listas_evento")
+-        .insert([payload]);
+-
+-      error = result.error;
+-    }
+-
+-    if (error) {
+-      console.log(error);
+-      alert("Erro ao salvar lista do evento.");
+-      setListaSalvando(false);
+-      return;
+-    }
+-
+-    const { data: listasData } = await supabase
+-      .from("listas_evento")
+-      .select("*")
+-      .eq("evento_id", eventoId)
+-      .order("id", { ascending: false });
+-
+-    if (listasData) {
+-      setListasEvento(listasData as ListaEvento[]);
+-    }
+-
+-    limparFormularioLista();
+-    setListaSalvando(false);
+-    setListaMensagem(
+-      listaSelecionadaId
+-        ? "Lista atualizada com sucesso."
+-        : "Lista criada com sucesso."
+-    );
+-  }
+-
+-  async function excluirLista(id: number) {
+-    if (!confirm("Deseja remover esta lista do evento?")) {
+-      return;
+-    }
+-
+-    const { error } = await supabase
+-      .from("listas_evento")
+-      .delete()
+-      .eq("id", id);
+-
+-    if (error) {
+-      console.log(error);
+-      alert("Erro ao excluir lista do evento.");
+-      return;
+-    }
+-
+-    setListasEvento((prev) => prev.filter((lista) => lista.id !== id));
+-    if (listaSelecionadaId === id) {
+-      limparFormularioLista();
+-    }
+-  }
+-
+   return (
+ 
+-    <main className="min-h-screen bg-slate-50 text-slate-900 p-4 sm:p-6 overflow-x-hidden">
+-
+-      <div className="max-w-4xl mx-auto bg-white border border-blue-100 rounded-3xl p-5 sm:p-8 shadow-sm">
+-
+-        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-6 sm:mb-8">
+-
+-          <h1 className="text-3xl sm:text-4xl font-extrabold text-blue-900 break-words">
+-            Editar Evento
+-          </h1>
+-
+-          <Link
+-            href={`/admin/eventos/${slugEvento}`}
+-            className="bg-blue-100 hover:bg-blue-200 text-blue-900 px-5 py-3 rounded-xl font-bold min-h-11 text-center"
+-          >
+-            Voltar
+-          </Link>
+-
+-        </div>
++    <AdminShell
++      role={roleUsuario}
++      title="Configuracoes do Evento"
++      subtitle="Edite informacoes principais, listas e acessos sem perder o contexto da Central do Evento."
++      breadcrumbs={[
++        { label: "Inicio", href: "/admin" },
++        { label: "Meus Eventos", href: "/admin#todos-eventos" },
++        { label: nome || slugEvento || "Evento", href: slugEvento ? `/admin/eventos/${slugEvento}` : undefined },
++        { label: "Configuracoes" },
++      ]}
++      backLink={{ href: slugEvento ? `/admin/eventos/${slugEvento}` : "/admin", label: "Voltar para Central do Evento" }}
++      aside={{
++        title: "Configuracoes do evento",
++        description:
++          "Edite os dados principais do evento e gerencie acessos de produtores e staff sem sair do fluxo administrativo.",
++      }}
++    >
++      <div className="space-y-6">
++        {slugEvento ? <AdminEventTabs slug={slugEvento} current="configuracoes" /> : null}
++
++        <div className="max-w-4xl bg-white border border-blue-100 rounded-3xl p-5 sm:p-8 shadow-sm">
+ 
+         <form
+           onSubmit={salvarEvento}
+           className="space-y-5"
+         >
+ 
++          <div id="configuracoes-evento" />
++
+           <input
+             type="text"
+             value={nome}
+@@ -694,357 +510,90 @@ export default function EditarEventoPage() {
+                 e.target.value
+               )
+             }
+-            placeholder="Nome do Evento"
+-            className="w-full p-4 rounded-xl bg-white text-black"
+-          />
+-
+-          <input
+-            type="date"
+-            value={dataEvento}
+-            onChange={(e) =>
+-              setDataEvento(
+-                e.target.value
+-              )
+-            }
+-            className="w-full p-4 rounded-xl bg-white text-black"
++            placeholder="Ex: Brazuca 2026"
++            className="w-full p-4 rounded-xl bg-white text-black border border-slate-200"
+           />
+ 
+-          <input
+-            type="time"
+-            value={horaEvento}
+-            onChange={(e) =>
+-              setHoraEvento(
+-                e.target.value
+-              )
+-            }
+-            className="w-full p-4 rounded-xl bg-white text-black"
+-          />
+-
+-          <input
+-            type="text"
+-            value={localEvento}
+-            onChange={(e) =>
+-              setLocalEvento(
+-                e.target.value
+-              )
+-            }
+-            placeholder="Local do Evento"
+-            className="w-full p-4 rounded-xl bg-white text-black"
+-          />
++          <div>
++            <label className="mb-2 block text-sm font-bold text-blue-900">Descricao do evento</label>
++            <textarea
++              value={descricao}
++              onChange={(e) => setDescricao(e.target.value)}
++              placeholder="Descreva o evento, atracoes, regras e informacoes importantes."
++              className="h-32 w-full rounded-xl border border-slate-200 bg-white p-4 text-black"
++            />
++          </div>
+ 
+-          <input
+-            type="text"
+-            value={mapsUrl}
+-            onChange={(e) =>
+-              setMapsUrl(
+-                e.target.value
+-              )
+-            }
+-            placeholder="Google Maps"
+-            className="w-full p-4 rounded-xl bg-white text-black"
+-          />          <div>
++          <div className="grid gap-4 md:grid-cols-2">
++            <div>
++              <label className="mb-2 block text-sm font-bold text-blue-900">Inicio do evento</label>
++              <input
++                type="datetime-local"
++                value={inicioEvento}
++                onChange={(e) => setInicioEvento(e.target.value)}
++                className="w-full p-4 rounded-xl bg-white text-black border border-slate-200"
++              />
++            </div>
+ 
+-            <p className="mb-2 text-blue-900 font-bold">
+-              Tipo da Lista
+-            </p>
++            <div>
++              <label className="mb-2 block text-sm font-bold text-blue-900">Termino do evento</label>
++              <input
++                type="datetime-local"
++                value={terminoEvento}
++                onChange={(e) => setTerminoEvento(e.target.value)}
++                className="w-full p-4 rounded-xl bg-white text-black border border-slate-200"
++              />
++            </div>
++          </div>
+ 
+-            <select
+-              value={tipoLista}
++          <div>
++            <label className="mb-2 block text-sm font-bold text-blue-900">Local</label>
++            <input
++              type="text"
++              value={localEvento}
+               onChange={(e) =>
+-                setTipoLista(
++                setLocalEvento(
+                   e.target.value
+                 )
+               }
+-              className="w-full p-4 rounded-xl bg-white text-black"
+-            >
+-
+-              <option value="simples">
+-                Lista Simples
+-              </option>
+-
+-              <option value="vip">
+-                Lista VIP
+-              </option>
+-
+-            </select>
+-
++              placeholder="Ex: Caza Brava"
++              className="w-full p-4 rounded-xl bg-white text-black border border-slate-200"
++            />
+           </div>
+ 
+           <div>
+-
+-            <p className="mb-2 text-blue-900 font-bold">
+-              Posição do Banner
+-            </p>
+-
+-            <select
+-              value={bannerPosicao}
++            <label className="mb-2 block text-sm font-bold text-blue-900">Link do Google Maps</label>
++            <input
++              type="url"
++              value={mapsUrl}
+               onChange={(e) =>
+-                setBannerPosicao(
++                setMapsUrl(
+                   e.target.value
+                 )
+               }
+-              className="w-full p-4 rounded-xl bg-white text-black"
+-            >
+-
+-              <option value="top">
+-                Topo
+-              </option>
+-
+-              <option value="center">
+-                Centro
+-              </option>
+-
+-              <option value="bottom">
+-                Baixo
+-              </option>
+-
+-            </select>
+-
++              placeholder="Cole aqui o link do Google Maps"
++              className="w-full p-4 rounded-xl bg-white text-black border border-slate-200"
++            />
+           </div>
+ 
+-          <div className="border-t border-slate-200 pt-6">
+-
+-            <h2 className="text-2xl font-bold text-blue-900 mb-4">
+-              Listas do Evento
+-            </h2>
+-
+-            <div className="grid gap-4 md:grid-cols-2 mb-6">
+-
+-              <div className="space-y-3">
+-
+-                <input
+-                  type="text"
+-                  placeholder="Nome da Lista"
+-                  value={listaNome}
+-                  onChange={(e) =>
+-                    setListaNome(e.target.value)
+-                  }
+-                  className="w-full p-4 rounded-xl bg-white text-black"
+-                />
+-
+-                <input
+-                  type="text"
+-                  placeholder="Slug da Lista (opcional)"
+-                  value={listaSlug}
+-                  onChange={(e) => setListaSlug(e.target.value)}
+-                  className="w-full p-4 rounded-xl bg-white text-black"
+-                />
+-
+-                <textarea
+-                  placeholder="Descrição"
+-                  value={listaDescricao}
+-                  onChange={(e) =>
+-                    setListaDescricao(e.target.value)
+-                  }
+-                  className="w-full p-4 rounded-xl bg-white text-black h-28"
+-                />
+-
+-                <input
+-                  type="text"
+-                  placeholder="Regra (ex: VIP, Lista VIP, Entrada Livre)"
+-                  value={listaRegra}
+-                  onChange={(e) =>
+-                    setListaRegra(e.target.value)
+-                  }
+-                  className="w-full p-4 rounded-xl bg-white text-black"
+-                />
+-
+-              </div>
+-
+-              <div className="space-y-3">
+-
+-                <select
+-                  value={listaVisibilidade}
+-                  onChange={(e) =>
+-                    setListaVisibilidade(e.target.value)
+-                  }
+-                  className="w-full p-4 rounded-xl bg-white text-black"
+-                >
+-                  <option value="publica">Visibilidade Pública</option>
+-                  <option value="privada">Visibilidade Privada</option>
+-                </select>
+-
+-                <select
+-                  value={listaTipo}
+-                  onChange={(e) => setListaTipo(e.target.value)}
+-                  className="w-full p-4 rounded-xl bg-white text-black"
+-                >
+-                  <option value="simples">Lista Simples</option>
+-                  <option value="vip">Lista VIP</option>
+-                </select>
+-
+-                <input
+-                  type="number"
+-                  placeholder="Valor"
+-                  value={listaValor}
+-                  onChange={(e) =>
+-                    setListaValor(e.target.value)
+-                  }
+-                  className="w-full p-4 rounded-xl bg-white text-black"
+-                />
+-
+-                <input
+-                  type="date"
+-                  placeholder="Prazo"
+-                  value={listaPrazo}
+-                  onChange={(e) =>
+-                    setListaPrazo(e.target.value)
+-                  }
+-                  className="w-full p-4 rounded-xl bg-white text-black"
+-                />
+-
+-                <div className="flex gap-3">
+-                  <input
+-                    type="number"
+-                    placeholder="Ordem"
+-                    value={listaOrdem}
+-                    onChange={(e) => setListaOrdem(e.target.value)}
+-                    className="w-1/2 p-4 rounded-xl bg-white text-black"
+-                  />
+-
+-                  <input
+-                    type="color"
+-                    title="Cor"
+-                    value={listaCor || "#000000"}
+-                    onChange={(e) => setListaCor(e.target.value)}
+-                    className="w-1/2 p-2 rounded-xl bg-white"
+-                  />
+-                </div>
+-
+-                <select
+-                  value={listaCategoria}
+-                  onChange={(e) => setListaCategoria(e.target.value)}
+-                  className="w-full p-4 rounded-xl bg-white text-black"
+-                >
+-                  <option value="promocional">promocional</option>
+-                  <option value="vip">vip</option>
+-                  <option value="aniversario">aniversario</option>
+-                  <option value="banda">banda</option>
+-                  <option value="influenciador">influenciador</option>
+-                  <option value="camarote">camarote</option>
+-                  <option value="staff">staff</option>
+-                  <option value="imprensa">imprensa</option>
+-                  <option value="patrocinador">patrocinador</option>
+-                  <option value="personalizada">personalizada</option>
+-                </select>
+-
+-                <input
+-                  type="text"
+-                  placeholder="Origem da campanha"
+-                  value={listaOrigemCampanha}
+-                  onChange={(e) => setListaOrigemCampanha(e.target.value)}
+-                  className="w-full p-4 rounded-xl bg-white text-black"
+-                />
+-
+-                <input
+-                  type="text"
+-                  placeholder="Responsável"
+-                  value={listaResponsavel}
+-                  onChange={(e) =>
+-                    setListaResponsavel(e.target.value)
+-                  }
+-                  className="w-full p-4 rounded-xl bg-white text-black"
+-                />
+-
+-                <label className="flex items-center gap-3">
+-                  <input
+-                    type="checkbox"
+-                    checked={listaAtiva}
+-                    onChange={(e) =>
+-                      setListaAtiva(e.target.checked)
+-                    }
+-                  />
+-                  <span>Lista ativa</span>
+-                </label>
+-
+-              </div>
+-
+-            </div>
+-
+-            <div className="flex gap-3 flex-wrap mb-4">
+-              <button
+-                type="button"
+-                onClick={salvarLista}
+-                disabled={listaSalvando}
+-                className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-2xl font-bold transition disabled:bg-slate-300 min-h-11"
+-              >
+-                {listaSalvando ? "SALVANDO..." : listaSelecionadaId ? "ATUALIZAR LISTA" : "CRIAR LISTA"}
+-              </button>
+-
+-              <button
+-                type="button"
+-                onClick={limparFormularioLista}
+-                className="bg-blue-100 hover:bg-blue-200 text-blue-900 px-5 py-3 rounded-2xl font-bold transition min-h-11"
+-              >
+-                Limpar
+-              </button>
+-            </div>
+-
+-            {listaMensagem && (
+-              <div className="mb-4 text-sm text-green-400">
+-                {listaMensagem}
++          <div>
++            <label className="mb-2 block text-sm font-bold text-blue-900">Banner do evento</label>
++            <p className="text-sm text-slate-500">Tamanho recomendado: 1920 × 600 px</p>
++            <p className="mb-3 text-sm text-slate-500">Formatos: JPG ou PNG</p>
++            <input
++              type="file"
++              accept="image/png,image/jpeg"
++              onChange={(e) => setBannerArquivo(e.target.files?.[0] || null)}
++              className="w-full p-4 rounded-xl bg-white text-black border border-slate-200"
++            />
++            {bannerUrl ? (
++              <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
++                <img src={bannerUrl} alt={nome || "Banner do evento"} className="h-40 w-full object-cover" />
+               </div>
+-            )}
+-
+-            <div className="space-y-3">
+-              {listasEvento.length === 0 ? (
+-                <p className="text-sm text-slate-500">
+-                  Nenhuma lista criada para este evento.
+-                </p>
+-              ) : (
+-                listasEvento.map((lista) => (
+-                  <div
+-                    key={lista.id}
+-                    className="bg-white border border-slate-200 rounded-3xl p-4 shadow-sm"
+-                  >
+-                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+-                      <div>
+-                        <h3 className="text-lg font-bold text-blue-900">{lista.nome}</h3>
+-                        <p className="text-sm text-slate-600">{lista.descricao || "Sem descrição"}</p>
+-                        <p className="text-sm text-slate-500">Regra: {lista.regra || "-"}</p>
+-                        <p className="text-sm text-slate-500">Slug: {lista.slug || "-"}</p>
+-                        <p className="text-sm text-slate-500">Visibilidade: {lista.visibilidade || "-"}</p>
+-                        <p className="text-sm text-slate-500">Tipo: {lista.tipo_lista || "-"}</p>
+-                        <p className="text-sm text-slate-500">Ordem: {lista.ordem ?? 0}</p>
+-                        <p className="text-sm text-slate-500">Cor: {lista.cor || "-"}</p>
+-                        <p className="text-sm text-slate-500">Categoria: {lista.categoria || "-"}</p>
+-                        <p className="text-sm text-slate-500">Origem: {lista.origem_campanha || "-"}</p>
+-                        <p className="text-sm text-slate-500">Valor: {lista.valor !== null ? `R$ ${lista.valor}` : "-"}</p>
+-                        <p className="text-sm text-slate-500">Prazo: {lista.prazo || "-"}</p>
+-                        <p className="text-sm text-slate-500">Responsável: {lista.responsavel || "-"}</p>
+-                        <p className="text-sm text-slate-500">Ativa: {lista.ativa ? "Sim" : "Não"}</p>
+-                      </div>
+-                      <div className="flex gap-2 flex-wrap">
+-                        <Link
+-                          href={`/admin/eventos/${slugEvento}/listas/${lista.id}`}
+-                          className="bg-green-500 hover:bg-green-400 text-white px-4 py-2 rounded-2xl font-bold transition min-h-10"
+-                        >
+-                          Ver Participantes
+-                        </Link>
+-                        <button
+-                          type="button"
+-                          onClick={() => editarLista(lista)}
+-                          className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-2xl font-bold transition min-h-10"
+-                        >
+-                          Editar
+-                        </button>
+-                        <button
+-                          type="button"
+-                          onClick={() => excluirLista(lista.id)}
+-                          className="bg-red-500 hover:bg-red-400 text-white px-4 py-2 rounded-2xl font-bold transition min-h-10"
+-                        >
+-                          Excluir
+-                        </button>
+-                      </div>
+-                    </div>
+-                  </div>
+-                ))
+-              )}
+-            </div>
+-
++            ) : null}
+           </div>
+ 
+-          <div className="border-t border-slate-200 pt-6">
++          <div id="equipe-acessos" className="border-t border-slate-200 pt-6">
+ 
+             <h2 className="text-2xl font-bold text-blue-900 mb-4">
+               Produtores com acesso
+@@ -1163,9 +712,10 @@ export default function EditarEventoPage() {
+ 
+         </form>
+ 
++        </div>
+       </div>
+ 
+-    </main>
++    </AdminShell>
+ 
+   );
+ 
+diff --git a/app/admin/eventos/[slug]/page.tsx b/app/admin/eventos/[slug]/page.tsx
+index bc196ba..47cf1ad 100644
+--- a/app/admin/eventos/[slug]/page.tsx
++++ b/app/admin/eventos/[slug]/page.tsx
+@@ -1,15 +1,41 @@
+ "use client";
+ 
+-import { useEffect, useState } from "react";
+-import { useParams } from "next/navigation";
++import { useEffect, useMemo, useState } from "react";
++import Link from "next/link";
++import { useParams, useSearchParams } from "next/navigation";
+ import { supabase } from "@/lib/supabase";
+-import { validarAcessoEvento } from "@/lib/permissoes";
++import { podeEditarEvento, validarAcessoEvento } from "@/lib/permissoes";
++import AdminShell from "@/app/components/AdminShell";
++import AdminEventTabs from "@/app/components/AdminEventTabs";
++import { gerarSlugUnicoLista } from "@/lib/slug";
+ 
+ import * as XLSX from "xlsx";
+ import { saveAs } from "file-saver";
+ 
++type ListaEventoResumo = {
++  id: number;
++  nome: string;
++  tipo_lista: string | null;
++  tipo_visibilidade?: string | null;
++  visibilidade?: string | null;
++  regra: string | null;
++  ativa: boolean;
++  slug: string | null;
++  created_at?: string | null;
++};
++
++function rotuloTipoLista(tipoLista: string | null) {
++  return tipoLista === "vip" ? "Lista Completa" : "Lista Simples";
++}
++
++function rotuloVisibilidadeLista(lista: ListaEventoResumo) {
++  const visibilidade = (lista.tipo_visibilidade || lista.visibilidade || "privada").toLowerCase();
++  return visibilidade === "publica" ? "Pública" : "Privada";
++}
++
+ export default function EventoDashboard() {
+   const params = useParams();
++  const searchParams = useSearchParams();
+   const slug =
+     typeof params?.slug === "string"
+       ? params.slug
+@@ -36,7 +62,31 @@ export default function EventoDashboard() {
+     useState<string | null>(null);
+ 
+   const [listasEvento, setListasEvento] =
+-    useState<Array<{ id: number; nome: string; tipo_lista: string | null }>>([]);
++    useState<ListaEventoResumo[]>([]);
++
++  const [mostrarCriarLista, setMostrarCriarLista] = useState(false);
++  const [listaNome, setListaNome] = useState("");
++  const [listaRegra, setListaRegra] = useState("");
++  const [listaTipo, setListaTipo] = useState("simples");
++  const [listaVisibilidade, setListaVisibilidade] = useState("privada");
++  const [listaAtiva, setListaAtiva] = useState(true);
++  const [listaEditandoId, setListaEditandoId] = useState<number | null>(null);
++  const [salvandoLista, setSalvandoLista] = useState(false);
++  const [mensagemLista, setMensagemLista] = useState("");
++
++  const mostrarMensagemCriacao = useMemo(() => searchParams.get("criado") === "1", [searchParams]);
++
++  async function carregarListas(eventoId: number) {
++    const { data: listasData } = await supabase
++      .from("listas_evento")
++      .select("*")
++      .eq("evento_id", eventoId)
++      .order("created_at", { ascending: false });
++
++    if (listasData) {
++      setListasEvento(listasData as ListaEventoResumo[]);
++    }
++  }
+ 
+   async function carregarDados() {
+     if (!slug) {
+@@ -76,13 +126,178 @@ export default function EventoDashboard() {
+       setParticipantes(data);
+     }
+ 
+-    const { data: listasData } = await supabase
+-      .from("listas_evento")
+-      .select("id, nome, tipo_lista")
+-      .eq("evento_id", eventoData.id);
++    await carregarListas(eventoData.id);
++  }
+ 
+-    if (listasData) {
+-      setListasEvento(listasData as Array<{ id: number; nome: string; tipo_lista: string | null }>);
++  async function salvarListaEvento(event: React.FormEvent<HTMLFormElement>) {
++    event.preventDefault();
++
++    setSalvandoLista(true);
++    setMensagemLista("");
++
++    try {
++      if (!evento?.id) {
++        setMensagemLista("Evento não identificado. Recarregue a página e tente novamente.");
++        return;
++      }
++
++      if (!listaNome.trim()) {
++        setMensagemLista("Informe o nome da lista para continuar.");
++        return;
++      }
++
++      const {
++        data: { user },
++        error: erroAuth,
++      } = await supabase.auth.getUser();
++
++      if (erroAuth || !user?.id) {
++        console.error("Erro capturado no catch:", erroAuth || { message: "Usuário não autenticado." });
++        setMensagemLista("Usuário não autenticado.");
++        return;
++      }
++
++      const permissaoCriar = await podeEditarEvento(slug);
++      if (!permissaoCriar.autorizado) {
++        console.error("Erro capturado no catch:", {
++          message: "Usuário sem permissão para criar listas neste evento.",
++          details: permissaoCriar.erro || null,
++          code: "APP_FORBIDDEN_CREATE_LISTA",
++          error: permissaoCriar,
++        });
++        setMensagemLista("Não foi possível criar a lista. Verifique os dados e tente novamente.");
++        return;
++      }
++
++      const slugGerado =
++        (await gerarSlugUnicoLista({
++          supabase,
++          titulo: listaNome,
++          eventoId: evento.id,
++        })) || null;
++
++      const payload: Record<string, unknown> = {
++        evento_id: evento.id,
++        nome: listaNome.trim(),
++        regra: listaRegra.trim() || null,
++        tipo_visibilidade: (listaVisibilidade || "privada").trim() || "privada",
++        tipo_lista: (listaTipo || "simples").trim() || "simples",
++        ativa: typeof listaAtiva === "boolean" ? listaAtiva : true,
++        slug: slugGerado,
++        criado_por: user.id,
++      };
++
++      if (!payload.evento_id) {
++        setMensagemLista("Evento não identificado. Recarregue a página e tente novamente.");
++        return;
++      }
++
++      console.log("Payload enviado para listas_evento:", payload);
++
++      const operacaoLista = listaEditandoId
++        ? await supabase.from("listas_evento").update(payload).eq("id", listaEditandoId).select("*").single()
++        : await supabase.from("listas_evento").insert([payload]).select("*").single();
++
++      const erroSupabase = operacaoLista.error;
++
++      if (erroSupabase) {
++        console.error("Erro bruto Supabase:", erroSupabase);
++        console.error("Erro Supabase message:", erroSupabase?.message);
++        console.error("Erro Supabase details:", erroSupabase?.details);
++        console.error("Erro Supabase hint:", erroSupabase?.hint);
++        console.error("Erro Supabase code:", erroSupabase?.code);
++        console.error("Erro Supabase JSON:", JSON.stringify(erroSupabase, null, 2));
++
++        setMensagemLista("Não foi possível criar a lista. Verifique os dados e tente novamente.");
++        return;
++      }
++
++      const listaPersistida = operacaoLista.data as ListaEventoResumo;
++
++      if (listaPersistida) {
++        if (listaEditandoId) {
++          setListasEvento((prev) => prev.map((item) => (item.id === listaEditandoId ? listaPersistida : item)));
++        } else {
++          setListasEvento((prev) => [listaPersistida, ...prev]);
++        }
++      } else {
++        await carregarListas(evento.id);
++      }
++
++      setListaNome("");
++      setListaRegra("");
++      setListaTipo("simples");
++      setListaVisibilidade("privada");
++      setListaAtiva(true);
++      setListaEditandoId(null);
++      setMostrarCriarLista(false);
++      setMensagemLista(listaEditandoId ? "Lista atualizada com sucesso." : "Lista criada com sucesso.");
++    } catch (erroCatch) {
++      console.error("Erro capturado no catch:", erroCatch);
++      setMensagemLista("Não foi possível criar a lista. Verifique os dados e tente novamente.");
++    } finally {
++      setSalvandoLista(false);
++    }
++  }
++
++  function abrirCriacaoLista() {
++    setMostrarCriarLista(true);
++    setMensagemLista("");
++    setListaEditandoId(null);
++    setListaNome("");
++    setListaRegra("");
++    setListaTipo("simples");
++    setListaVisibilidade("privada");
++    setListaAtiva(true);
++
++    requestAnimationFrame(() => {
++      const secao = document.getElementById("listas-evento");
++      if (secao) {
++        secao.scrollIntoView({ behavior: "smooth", block: "start" });
++      }
++    });
++  }
++
++  function abrirEdicaoLista(lista: ListaEventoResumo) {
++    setMostrarCriarLista(true);
++    setMensagemLista("");
++    setListaEditandoId(lista.id);
++    setListaNome(lista.nome || "");
++    setListaRegra(lista.regra || "");
++    setListaTipo(lista.tipo_lista || "simples");
++    setListaVisibilidade((lista.tipo_visibilidade || lista.visibilidade || "privada").toLowerCase());
++    setListaAtiva(lista.ativa);
++
++    requestAnimationFrame(() => {
++      const secao = document.getElementById("listas-evento");
++      if (secao) {
++        secao.scrollIntoView({ behavior: "smooth", block: "start" });
++      }
++    });
++  }
++
++  async function excluirListaCentral(listaId: number) {
++    if (!confirm("Deseja remover esta lista do evento?")) {
++      return;
++    }
++
++    const { error } = await supabase.from("listas_evento").delete().eq("id", listaId);
++
++    if (error) {
++      console.error("Erro ao excluir lista:", error);
++      setMensagemLista("Não foi possível excluir a lista. Tente novamente.");
++      return;
++    }
++
++    setListasEvento((prev) => prev.filter((lista) => lista.id !== listaId));
++    if (listaEditandoId === listaId) {
++      setListaEditandoId(null);
++      setListaNome("");
++      setListaRegra("");
++      setListaTipo("simples");
++      setListaVisibilidade("privada");
++      setListaAtiva(true);
++      setMostrarCriarLista(false);
+     }
+   }
+ 
+@@ -261,6 +476,12 @@ export default function EventoDashboard() {
+     }
+   }, [slug]);
+ 
++  useEffect(() => {
++    if (mostrarMensagemCriacao) {
++      setMostrarCriarLista(true);
++    }
++  }, [mostrarMensagemCriacao]);
++
+   // FILTRO + BUSCA
+ 
+   const participantesFiltrados =
+@@ -402,7 +623,30 @@ export default function EventoDashboard() {
+ 
+   return (
+ 
+-    <main className="min-h-screen bg-slate-50 text-slate-900 overflow-x-hidden">
++    <AdminShell
++      role={(roleUsuario as "super_admin" | "produtor" | "staff" | null) ?? null}
++      title="Central do Evento"
++      subtitle={evento ? `Acompanhe convidados, check-in e performance operacional de ${evento.nome}.` : "Acompanhe o evento em tempo real."}
++      breadcrumbs={[
++        { label: "Inicio", href: "/admin" },
++        { label: "Meus Eventos", href: "/admin#todos-eventos" },
++        { label: evento?.nome || "Evento" },
++      ]}
++      backLink={{ href: "/admin#todos-eventos", label: "Voltar para Meus Eventos" }}
++      aside={{
++        title: "Central do Evento",
++        description:
++          "Use esta central para acompanhar convidados, validar entradas, navegar para listas e manter a operacao do evento organizada em um unico lugar.",
++      }}
++    >
++      <div className="space-y-6">
++        <AdminEventTabs slug={evento.slug} current="visao-geral" />
++
++        {mostrarMensagemCriacao ? (
++          <section className="rounded-3xl border border-green-200 bg-green-50 px-5 py-4 text-green-700 shadow-sm">
++            <p className="font-semibold">Evento criado com sucesso. Agora crie suas listas.</p>
++          </section>
++        ) : null}
+ 
+       {/* HERO */}
+ 
+@@ -431,18 +675,28 @@ export default function EventoDashboard() {
+           </h1>
+ 
+           <p className="mt-3 text-lg sm:text-2xl">
+-  Dashboard do Evento
++  Central do Evento
+ </p>
+ 
+ <div className="flex gap-3 mt-5 flex-wrap justify-center w-full px-2">
+ 
+   {(roleUsuario === "super_admin" || roleUsuario === "produtor") && (
+-    <a
+-      href={`/admin/eventos/${evento.slug}/editar`}
+-      className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-2xl font-bold transition min-h-11"
+-    >
+-      Editar Evento
+-    </a>
++    <>
++      <Link
++        href={`/admin/eventos/${evento.slug}/editar`}
++        className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-2xl font-bold transition min-h-11"
++      >
++        Editar Evento
++      </Link>
++
++      <button
++        type="button"
++        onClick={abrirCriacaoLista}
++        className="bg-blue-800 hover:bg-blue-700 text-white px-5 py-3 rounded-2xl font-extrabold shadow-lg shadow-blue-200 transition min-h-11"
++      >
++        Criar Lista
++      </button>
++    </>
+   )}
+ 
+   {roleUsuario === "staff" && (
+@@ -479,67 +733,229 @@ export default function EventoDashboard() {
+ 
+       </section>
+ 
+-      <section className="p-4 sm:p-6">
++      <section id="listas-evento" className="rounded-3xl border border-blue-100 bg-white p-5 sm:p-6 shadow-sm">
++        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
++          <div>
++            <h2 className="text-2xl font-bold text-blue-900">Listas do Evento</h2>
++            <p className="mt-1 text-sm text-slate-500">Crie e abra listas diretamente da Central do Evento.</p>
++          </div>
++
++          {(roleUsuario === "super_admin" || roleUsuario === "produtor") && !mostrarCriarLista ? (
++            <button
++              type="button"
++              onClick={abrirCriacaoLista}
++              className="inline-flex min-h-11 items-center justify-center rounded-2xl bg-blue-700 px-4 py-3 text-sm font-extrabold text-white transition hover:bg-blue-600"
++            >
++              Criar Lista
++            </button>
++          ) : null}
++        </div>
++
++        {(roleUsuario === "super_admin" || roleUsuario === "produtor") && mostrarCriarLista ? (
++          <form onSubmit={salvarListaEvento} className="mt-5 rounded-3xl border border-blue-100 bg-blue-50/40 p-4 sm:p-5">
++            <div className="space-y-4">
++              <div>
++                <label className="mb-2 block text-sm font-semibold text-blue-900">Nome da Lista</label>
++                <input
++                  type="text"
++                  value={listaNome}
++                  onChange={(e) => setListaNome(e.target.value)}
++                  placeholder="Nome da lista"
++                  className="w-full rounded-xl border border-slate-200 bg-white p-3 text-black"
++                />
++              </div>
++
++              <div>
++                <label className="mb-2 block text-sm font-semibold text-blue-900">Tipo da Lista</label>
++                <select
++                  value={listaTipo}
++                  onChange={(e) => setListaTipo(e.target.value)}
++                  className="w-full rounded-xl border border-slate-200 bg-white p-3 text-black"
++                >
++                  <option value="simples">Lista Simples</option>
++                  <option value="vip">Lista Completa</option>
++                </select>
++              </div>
++
++              <div>
++                <label className="mb-2 block text-sm font-semibold text-blue-900">Visibilidade</label>
++                <select
++                  value={listaVisibilidade}
++                  onChange={(e) => setListaVisibilidade(e.target.value)}
++                  className="w-full rounded-xl border border-slate-200 bg-white p-3 text-black"
++                >
++                  <option value="publica">Lista Pública</option>
++                  <option value="privada">Lista Privada</option>
++                </select>
++              </div>
++
++              <div>
++                <label className="mb-2 block text-sm font-semibold text-blue-900">Regra da Lista</label>
++                <input
++                  type="text"
++                  value={listaRegra}
++                  onChange={(e) => setListaRegra(e.target.value)}
++                  placeholder="Ex: VIP, Entrada ate 22h"
++                  className="w-full rounded-xl border border-slate-200 bg-white p-3 text-black"
++                />
++              </div>
++
++              <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
++                <input
++                  type="checkbox"
++                  checked={listaAtiva}
++                  onChange={(e) => setListaAtiva(e.target.checked)}
++                />
++                Lista ativa
++              </label>
++
++              <div className="flex flex-wrap gap-3 pt-1">
++                <button
++                  type="submit"
++                  disabled={salvandoLista}
++                  className="inline-flex min-h-11 items-center justify-center rounded-2xl bg-blue-700 px-5 py-3 text-sm font-extrabold text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-slate-300"
++                >
++                  {salvandoLista ? "Salvando..." : listaEditandoId ? "Salvar Alterações" : "Salvar Lista"}
++                </button>
++                <button
++                  type="button"
++                  onClick={() => {
++                    setMostrarCriarLista(false);
++                    setListaEditandoId(null);
++                    setListaNome("");
++                    setListaRegra("");
++                    setListaTipo("simples");
++                    setListaVisibilidade("privada");
++                    setListaAtiva(true);
++                  }}
++                  className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
++                >
++                  Fechar
++                </button>
++              </div>
++            </div>
++
++            {mensagemLista ? (
++              <p className={`mt-4 text-sm font-semibold ${mensagemLista.includes("Não foi possível") ? "text-red-600" : "text-green-700"}`}>
++                {mensagemLista}
++              </p>
++            ) : null}
++          </form>
++        ) : null}
++
++        {roleUsuario === "staff" ? (
++          <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700">
++            Seu perfil possui acesso focado em check-in e nao permite criar listas.
++          </p>
++        ) : null}
++
++        <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
++          {listasEvento.length === 0 ? (
++            <p className="text-sm text-slate-500">Nenhuma lista criada para este evento.</p>
++          ) : (
++            listasEvento.map((lista) => (
++              <article key={lista.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
++                <h3 className="text-base font-bold text-blue-900 break-words">{lista.nome}</h3>
++                <p className="mt-1 text-sm text-slate-500">Tipo: {rotuloTipoLista(lista.tipo_lista ?? null)}</p>
++                <p className="mt-1 text-sm text-slate-500">Visibilidade: {rotuloVisibilidadeLista(lista)}</p>
++                <p className="mt-1 text-sm text-slate-500">Regra: {lista.regra || "-"}</p>
++                <p className="mt-1 text-sm text-slate-500">Status: {lista.ativa ? "Ativa" : "Inativa"}</p>
++
++                <div className="mt-3 flex flex-wrap gap-2">
++                  <Link
++                    href={`/admin/eventos/${evento.slug}/listas/${lista.id}`}
++                    className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-blue-500"
++                  >
++                    Abrir Lista
++                  </Link>
++
++                  {(roleUsuario === "super_admin" || roleUsuario === "produtor") ? (
++                    <>
++                      <button
++                        type="button"
++                        onClick={() => abrirEdicaoLista(lista)}
++                        className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-100 px-4 py-2 text-sm font-bold text-blue-900 transition hover:bg-blue-200"
++                      >
++                        Editar Lista
++                      </button>
++
++                      <button
++                        type="button"
++                        onClick={() => void excluirListaCentral(lista.id)}
++                        className="inline-flex min-h-10 items-center justify-center rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-400"
++                      >
++                        Excluir Lista
++                      </button>
++                    </>
++                  ) : null}
++                </div>
++              </article>
++            ))
++          )}
++        </div>
++      </section>
++
++      <section className="p-4 sm:p-6" id="check-in">
+ 
+         {/* CARDS */}
+ 
+-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4 sm:gap-6 mb-8">
++        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 sm:gap-5">
+ 
+-          <div className="bg-white border border-blue-100 rounded-3xl p-6 text-center shadow-sm">
++          <div className="flex min-h-[168px] h-full flex-col items-center justify-center rounded-3xl border border-blue-100 bg-white p-6 text-center shadow-sm">
+ 
+-            <p className="text-slate-500">
++            <p className="min-h-6 text-slate-500">
+               Total Confirmados
+             </p>
+ 
+-            <h2 className="text-4xl sm:text-5xl font-bold text-blue-900 mt-3">
++            <h2 className="mt-3 text-4xl font-bold text-blue-900 sm:text-5xl">
+               {totalConfirmados}
+             </h2>
+ 
+           </div>
+ 
+-          <div className="bg-white border border-green-200 rounded-3xl p-6 text-center shadow-sm">
++          <div className="flex min-h-[168px] h-full flex-col items-center justify-center rounded-3xl border border-green-200 bg-white p-6 text-center shadow-sm">
+ 
+-            <p className="text-slate-500">
++            <p className="min-h-6 text-slate-500">
+               Presentes
+             </p>
+ 
+-            <h2 className="text-4xl sm:text-5xl font-bold text-green-600 mt-3">
++            <h2 className="mt-3 text-4xl font-bold text-green-600 sm:text-5xl">
+               {totalPresentes}
+             </h2>
+ 
+           </div>
+ 
+-          <div className="bg-white border border-amber-200 rounded-3xl p-6 text-center shadow-sm">
++          <div className="flex min-h-[168px] h-full flex-col items-center justify-center rounded-3xl border border-amber-200 bg-white p-6 text-center shadow-sm">
+ 
+-            <p className="text-slate-500">
++            <p className="min-h-6 text-slate-500">
+               Pendentes
+             </p>
+ 
+-            <h2 className="text-4xl sm:text-5xl font-bold text-amber-600 mt-3">
++            <h2 className="mt-3 text-4xl font-bold text-amber-600 sm:text-5xl">
+               {totalPendentes}
+             </h2>
+ 
+           </div>
+ 
+-          <div className="bg-white border border-blue-100 rounded-3xl p-6 text-center shadow-sm">
++          <div className="flex min-h-[168px] h-full flex-col items-center justify-center rounded-3xl border border-blue-100 bg-white p-6 text-center shadow-sm">
+ 
+-            <p className="text-slate-500">
++            <p className="min-h-6 text-slate-500">
+               Comparecimento
+             </p>
+ 
+-            <h2 className="text-4xl sm:text-5xl font-bold text-blue-500 mt-3">
++            <h2 className="mt-3 text-4xl font-bold text-blue-500 sm:text-5xl">
+               {porcentagemComparecimento}%
+             </h2>
+ 
+           </div>
+ 
+-          <div className="bg-white border border-amber-200 rounded-3xl p-6 text-center shadow-sm">
++          <div className="flex min-h-[168px] h-full flex-col items-center justify-center rounded-3xl border border-orange-200 bg-white p-6 text-center shadow-sm">
+ 
+-            <p className="text-slate-500">
++            <p className="min-h-6 text-slate-500">
+               Horário Mais Quente
+             </p>
+ 
+-            <h2 className="text-3xl sm:text-4xl font-bold text-orange-500 mt-3">
++            <h2 className="mt-3 text-3xl font-bold text-orange-500 sm:text-4xl">
+               🔥 {horarioMaisQuente}
+             </h2>
+ 
+@@ -569,17 +985,26 @@ export default function EventoDashboard() {
+ 
+         {/* BUSCA */}
+ 
+-        <input
+-          type="text"
+-          placeholder="Buscar participante..."
+-          value={busca}
+-          onChange={(e) =>
+-            setBusca(
+-              e.target.value
+-            )
+-          }
+-          className="w-full p-4 rounded-xl bg-white text-black mb-6 text-base"
+-        />
++        <div id="convidados" className="mb-6 rounded-3xl border border-blue-100 bg-white p-5 shadow-sm">
++          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
++            <div>
++              <h2 className="text-2xl font-bold text-blue-900">Convidados e check-in</h2>
++              <p className="mt-1 text-sm text-slate-500">Busque um participante para agilizar o atendimento na porta.</p>
++            </div>
++
++            <input
++              type="text"
++              placeholder="Buscar participante..."
++              value={busca}
++              onChange={(e) =>
++                setBusca(
++                  e.target.value
++                )
++              }
++              className="w-full rounded-xl border border-slate-200 bg-white p-4 text-black text-base md:max-w-md"
++            />
++          </div>
++        </div>
+ 
+         {/* FILTROS */}
+ 
+@@ -801,6 +1226,7 @@ export default function EventoDashboard() {
+ 
+       </section>
+ 
+-    </main>
++      </div>
++    </AdminShell>
+   );
+ }
+\ No newline at end of file

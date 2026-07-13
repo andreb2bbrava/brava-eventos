@@ -1,0 +1,799 @@
+diff --git a/app/admin/eventos/[slug]/page.tsx b/app/admin/eventos/[slug]/page.tsx
+index bc196ba..1da4a92 100644
+--- a/app/admin/eventos/[slug]/page.tsx
++++ b/app/admin/eventos/[slug]/page.tsx
+@@ -1,15 +1,45 @@
+ "use client";
+ 
+-import { useEffect, useState } from "react";
+-import { useParams } from "next/navigation";
++import { useEffect, useMemo, useState } from "react";
++import Link from "next/link";
++import { useParams, useSearchParams } from "next/navigation";
+ import { supabase } from "@/lib/supabase";
+-import { validarAcessoEvento } from "@/lib/permissoes";
++import { podeEditarEvento, validarAcessoEvento } from "@/lib/permissoes";
++import AdminShell from "@/app/components/AdminShell";
++import AdminEventTabs from "@/app/components/AdminEventTabs";
++import { gerarSlugUnicoLista } from "@/lib/slug";
+ 
+ import * as XLSX from "xlsx";
+ import { saveAs } from "file-saver";
+ 
++type ListaEventoResumo = {
++  id: number;
++  nome: string;
++  tipo_lista: string | null;
++  tipo_visibilidade?: string | null;
++  visibilidade?: string | null;
++  regra: string | null;
++  ativa: boolean;
++  slug: string | null;
++  created_at?: string | null;
++};
++
++function rotuloTipoLista(tipoLista: string | null) {
++  return tipoLista === "vip" ? "Lista Completa" : "Lista Simples";
++}
++
++function rotuloVisibilidadeLista(lista: ListaEventoResumo) {
++  const visibilidade = (lista.tipo_visibilidade || lista.visibilidade || "privada").toLowerCase();
++  return visibilidade === "publica" ? "Pública" : "Privada";
++}
++
++function normalizarNomeLista(valor: string) {
++  return valor.trim().toLowerCase();
++}
++
+ export default function EventoDashboard() {
+   const params = useParams();
++  const searchParams = useSearchParams();
+   const slug =
+     typeof params?.slug === "string"
+       ? params.slug
+@@ -36,7 +66,31 @@ export default function EventoDashboard() {
+     useState<string | null>(null);
+ 
+   const [listasEvento, setListasEvento] =
+-    useState<Array<{ id: number; nome: string; tipo_lista: string | null }>>([]);
++    useState<ListaEventoResumo[]>([]);
++
++  const [mostrarCriarLista, setMostrarCriarLista] = useState(false);
++  const [listaNome, setListaNome] = useState("");
++  const [listaRegra, setListaRegra] = useState("");
++  const [listaTipo, setListaTipo] = useState("simples");
++  const [listaVisibilidade, setListaVisibilidade] = useState("privada");
++  const [listaAtiva, setListaAtiva] = useState(true);
++  const [listaEditandoId, setListaEditandoId] = useState<number | null>(null);
++  const [salvandoLista, setSalvandoLista] = useState(false);
++  const [mensagemLista, setMensagemLista] = useState("");
++
++  const mostrarMensagemCriacao = useMemo(() => searchParams.get("criado") === "1", [searchParams]);
++
++  async function carregarListas(eventoId: number) {
++    const { data: listasData } = await supabase
++      .from("listas_evento")
++      .select("*")
++      .eq("evento_id", eventoId)
++      .order("created_at", { ascending: false });
++
++    if (listasData) {
++      setListasEvento(listasData as ListaEventoResumo[]);
++    }
++  }
+ 
+   async function carregarDados() {
+     if (!slug) {
+@@ -76,13 +130,208 @@ export default function EventoDashboard() {
+       setParticipantes(data);
+     }
+ 
+-    const { data: listasData } = await supabase
+-      .from("listas_evento")
+-      .select("id, nome, tipo_lista")
+-      .eq("evento_id", eventoData.id);
++    await carregarListas(eventoData.id);
++  }
+ 
+-    if (listasData) {
+-      setListasEvento(listasData as Array<{ id: number; nome: string; tipo_lista: string | null }>);
++  async function salvarListaEvento(event: React.FormEvent<HTMLFormElement>) {
++    event.preventDefault();
++
++    setSalvandoLista(true);
++    setMensagemLista("");
++
++    try {
++      if (!evento?.id) {
++        setMensagemLista("Evento não identificado. Recarregue a página e tente novamente.");
++        return;
++      }
++
++      if (!listaNome.trim()) {
++        setMensagemLista("Informe o nome da lista para continuar.");
++        return;
++      }
++
++      const nomeNormalizado = normalizarNomeLista(listaNome);
++
++      const { data: listasMesmoEvento, error: erroBuscaDuplicidade } = await supabase
++        .from("listas_evento")
++        .select("id, nome")
++        .eq("evento_id", evento.id);
++
++      if (erroBuscaDuplicidade) {
++        console.error("Erro ao validar duplicidade de lista:", erroBuscaDuplicidade);
++        setMensagemLista("Não foi possível criar a lista. Verifique os dados e tente novamente.");
++        return;
++      }
++
++      const duplicada = (listasMesmoEvento || []).some((listaExistente) => {
++        const mesmoNome = normalizarNomeLista(listaExistente.nome || "") === nomeNormalizado;
++        const mesmaLista = listaEditandoId && listaExistente.id === listaEditandoId;
++        return mesmoNome && !mesmaLista;
++      });
++
++      if (duplicada) {
++        setMensagemLista("Já existe uma lista com esse nome neste evento.");
++        return;
++      }
++
++      const {
++        data: { user },
++        error: erroAuth,
++      } = await supabase.auth.getUser();
++
++      if (erroAuth || !user?.id) {
++        console.error("Erro capturado no catch:", erroAuth || { message: "Usuário não autenticado." });
++        setMensagemLista("Usuário não autenticado.");
++        return;
++      }
++
++      const permissaoCriar = await podeEditarEvento(slug);
++      if (!permissaoCriar.autorizado) {
++        console.error("Erro capturado no catch:", {
++          message: "Usuário sem permissão para criar listas neste evento.",
++          details: permissaoCriar.erro || null,
++          code: "APP_FORBIDDEN_CREATE_LISTA",
++          error: permissaoCriar,
++        });
++        setMensagemLista("Não foi possível criar a lista. Verifique os dados e tente novamente.");
++        return;
++      }
++
++      const slugGerado =
++        (await gerarSlugUnicoLista({
++          supabase,
++          titulo: listaNome,
++          eventoId: evento.id,
++        })) || null;
++
++      const payload: Record<string, unknown> = {
++        evento_id: evento.id,
++        nome: listaNome.trim(),
++        regra: listaRegra.trim() || null,
++        tipo_visibilidade: (listaVisibilidade || "privada").trim() || "privada",
++        tipo_lista: (listaTipo || "simples").trim() || "simples",
++        ativa: typeof listaAtiva === "boolean" ? listaAtiva : true,
++        slug: slugGerado,
++        criado_por: user.id,
++      };
++
++      if (!payload.evento_id) {
++        setMensagemLista("Evento não identificado. Recarregue a página e tente novamente.");
++        return;
++      }
++
++      console.log("Payload enviado para listas_evento:", payload);
++
++      const operacaoLista = listaEditandoId
++        ? await supabase
++            .from("listas_evento")
++            .update(payload)
++            .eq("id", listaEditandoId)
++            .eq("evento_id", evento.id)
++            .select("*")
++            .single()
++        : await supabase.from("listas_evento").insert([payload]).select("*").single();
++
++      const erroSupabase = operacaoLista.error;
++
++      if (erroSupabase) {
++        console.error("Erro bruto Supabase:", erroSupabase);
++        console.error("Erro Supabase message:", erroSupabase?.message);
++        console.error("Erro Supabase details:", erroSupabase?.details);
++        console.error("Erro Supabase hint:", erroSupabase?.hint);
++        console.error("Erro Supabase code:", erroSupabase?.code);
++        console.error("Erro Supabase JSON:", JSON.stringify(erroSupabase, null, 2));
++
++        setMensagemLista("Não foi possível criar a lista. Verifique os dados e tente novamente.");
++        return;
++      }
++
++      const listaPersistida = operacaoLista.data as ListaEventoResumo;
++
++      if (listaPersistida) {
++        if (listaEditandoId) {
++          setListasEvento((prev) => prev.map((item) => (item.id === listaEditandoId ? listaPersistida : item)));
++        } else {
++          setListasEvento((prev) => [listaPersistida, ...prev]);
++        }
++      } else {
++        await carregarListas(evento.id);
++      }
++
++      setListaNome("");
++      setListaRegra("");
++      setListaTipo("simples");
++      setListaVisibilidade("privada");
++      setListaAtiva(true);
++      setListaEditandoId(null);
++      setMostrarCriarLista(false);
++      setMensagemLista(listaEditandoId ? "Lista atualizada com sucesso." : "Lista criada com sucesso.");
++    } catch (erroCatch) {
++      console.error("Erro capturado no catch:", erroCatch);
++      setMensagemLista("Não foi possível criar a lista. Verifique os dados e tente novamente.");
++    } finally {
++      setSalvandoLista(false);
++    }
++  }
++
++  function abrirCriacaoLista() {
++    setMostrarCriarLista(true);
++    setMensagemLista("");
++    setListaEditandoId(null);
++    setListaNome("");
++    setListaRegra("");
++    setListaTipo("simples");
++    setListaVisibilidade("privada");
++    setListaAtiva(true);
++
++    requestAnimationFrame(() => {
++      const secao = document.getElementById("listas-evento");
++      if (secao) {
++        secao.scrollIntoView({ behavior: "smooth", block: "start" });
++      }
++    });
++  }
++
++  function abrirEdicaoLista(lista: ListaEventoResumo) {
++    setMostrarCriarLista(true);
++    setMensagemLista("");
++    setListaEditandoId(lista.id);
++    setListaNome(lista.nome || "");
++    setListaRegra(lista.regra || "");
++    setListaTipo(lista.tipo_lista || "simples");
++    setListaVisibilidade((lista.tipo_visibilidade || lista.visibilidade || "privada").toLowerCase());
++    setListaAtiva(lista.ativa);
++
++    requestAnimationFrame(() => {
++      const secao = document.getElementById("listas-evento");
++      if (secao) {
++        secao.scrollIntoView({ behavior: "smooth", block: "start" });
++      }
++    });
++  }
++
++  async function excluirListaCentral(listaId: number) {
++    if (!confirm("Deseja remover esta lista do evento?")) {
++      return;
++    }
++
++    const { error } = await supabase.from("listas_evento").delete().eq("id", listaId);
++
++    if (error) {
++      console.error("Erro ao excluir lista:", error);
++      setMensagemLista("Não foi possível excluir a lista. Tente novamente.");
++      return;
++    }
++
++    setListasEvento((prev) => prev.filter((lista) => lista.id !== listaId));
++    if (listaEditandoId === listaId) {
++      setListaEditandoId(null);
++      setListaNome("");
++      setListaRegra("");
++      setListaTipo("simples");
++      setListaVisibilidade("privada");
++      setListaAtiva(true);
++      setMostrarCriarLista(false);
+     }
+   }
+ 
+@@ -261,6 +510,12 @@ export default function EventoDashboard() {
+     }
+   }, [slug]);
+ 
++  useEffect(() => {
++    if (mostrarMensagemCriacao) {
++      setMostrarCriarLista(true);
++    }
++  }, [mostrarMensagemCriacao]);
++
+   // FILTRO + BUSCA
+ 
+   const participantesFiltrados =
+@@ -402,7 +657,30 @@ export default function EventoDashboard() {
+ 
+   return (
+ 
+-    <main className="min-h-screen bg-slate-50 text-slate-900 overflow-x-hidden">
++    <AdminShell
++      role={(roleUsuario as "super_admin" | "produtor" | "staff" | null) ?? null}
++      title="Central do Evento"
++      subtitle={evento ? `Acompanhe convidados, check-in e performance operacional de ${evento.nome}.` : "Acompanhe o evento em tempo real."}
++      breadcrumbs={[
++        { label: "Inicio", href: "/admin" },
++        { label: "Meus Eventos", href: "/admin#todos-eventos" },
++        { label: evento?.nome || "Evento" },
++      ]}
++      backLink={{ href: "/admin#todos-eventos", label: "Voltar para Meus Eventos" }}
++      aside={{
++        title: "Central do Evento",
++        description:
++          "Use esta central para acompanhar convidados, validar entradas, navegar para listas e manter a operacao do evento organizada em um unico lugar.",
++      }}
++    >
++      <div className="space-y-6">
++        <AdminEventTabs slug={evento.slug} current="visao-geral" />
++
++        {mostrarMensagemCriacao ? (
++          <section className="rounded-3xl border border-green-200 bg-green-50 px-5 py-4 text-green-700 shadow-sm">
++            <p className="font-semibold">Evento criado com sucesso. Agora crie suas listas.</p>
++          </section>
++        ) : null}
+ 
+       {/* HERO */}
+ 
+@@ -431,18 +709,28 @@ export default function EventoDashboard() {
+           </h1>
+ 
+           <p className="mt-3 text-lg sm:text-2xl">
+-  Dashboard do Evento
++  Central do Evento
+ </p>
+ 
+ <div className="flex gap-3 mt-5 flex-wrap justify-center w-full px-2">
+ 
+   {(roleUsuario === "super_admin" || roleUsuario === "produtor") && (
+-    <a
+-      href={`/admin/eventos/${evento.slug}/editar`}
+-      className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-2xl font-bold transition min-h-11"
+-    >
+-      Editar Evento
+-    </a>
++    <>
++      <Link
++        href={`/admin/eventos/${evento.slug}/editar`}
++        className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-2xl font-bold transition min-h-11"
++      >
++        Editar Evento
++      </Link>
++
++      <button
++        type="button"
++        onClick={abrirCriacaoLista}
++        className="bg-blue-800 hover:bg-blue-700 text-white px-5 py-3 rounded-2xl font-extrabold shadow-lg shadow-blue-200 transition min-h-11"
++      >
++        Criar Lista
++      </button>
++    </>
+   )}
+ 
+   {roleUsuario === "staff" && (
+@@ -479,67 +767,263 @@ export default function EventoDashboard() {
+ 
+       </section>
+ 
+-      <section className="p-4 sm:p-6">
++      <section id="listas-evento" className="rounded-3xl border border-blue-100 bg-white p-5 sm:p-6 shadow-sm">
++        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
++          <div>
++            <h2 className="text-2xl font-bold text-blue-900">Listas do Evento</h2>
++            <p className="mt-1 text-sm text-slate-500">Crie e abra listas diretamente da Central do Evento.</p>
++          </div>
++
++          {(roleUsuario === "super_admin" || roleUsuario === "produtor") && !mostrarCriarLista ? (
++            <button
++              type="button"
++              onClick={abrirCriacaoLista}
++              className="inline-flex min-h-11 items-center justify-center rounded-2xl bg-blue-700 px-4 py-3 text-sm font-extrabold text-white transition hover:bg-blue-600"
++            >
++              Criar Lista
++            </button>
++          ) : null}
++        </div>
++
++        {(roleUsuario === "super_admin" || roleUsuario === "produtor") && mostrarCriarLista ? (
++          <form onSubmit={salvarListaEvento} className="mt-5 rounded-3xl border border-blue-100 bg-blue-50/40 p-4 sm:p-5">
++            <div className="space-y-4">
++              <div>
++                <label className="mb-2 block text-sm font-semibold text-blue-900">Nome da Lista</label>
++                <input
++                  type="text"
++                  value={listaNome}
++                  onChange={(e) => setListaNome(e.target.value)}
++                  placeholder="Nome da lista"
++                  className="w-full rounded-xl border border-slate-200 bg-white p-3 text-black"
++                />
++              </div>
++
++              <div>
++                <label className="mb-2 block text-sm font-semibold text-blue-900">Tipo da Lista</label>
++                <select
++                  value={listaTipo}
++                  onChange={(e) => setListaTipo(e.target.value)}
++                  className="w-full rounded-xl border border-slate-200 bg-white p-3 text-black"
++                >
++                  <option value="simples">Lista Simples</option>
++                  <option value="vip">Lista Completa</option>
++                </select>
++              </div>
++
++              <div>
++                <label className="mb-2 block text-sm font-semibold text-blue-900">Visibilidade</label>
++                <select
++                  value={listaVisibilidade}
++                  onChange={(e) => setListaVisibilidade(e.target.value)}
++                  className="w-full rounded-xl border border-slate-200 bg-white p-3 text-black"
++                >
++                  <option value="publica">Lista Pública</option>
++                  <option value="privada">Lista Privada</option>
++                </select>
++              </div>
++
++              <div>
++                <label className="mb-2 block text-sm font-semibold text-blue-900">Regra da Lista</label>
++                <input
++                  type="text"
++                  value={listaRegra}
++                  onChange={(e) => setListaRegra(e.target.value)}
++                  placeholder="Ex: VIP, Entrada ate 22h"
++                  className="w-full rounded-xl border border-slate-200 bg-white p-3 text-black"
++                />
++              </div>
++
++              <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
++                <input
++                  type="checkbox"
++                  checked={listaAtiva}
++                  onChange={(e) => setListaAtiva(e.target.checked)}
++                />
++                Lista ativa
++              </label>
++
++              <div className="flex flex-wrap gap-3 pt-1">
++                <button
++                  type="submit"
++                  disabled={salvandoLista}
++                  className="inline-flex min-h-11 items-center justify-center rounded-2xl bg-blue-700 px-5 py-3 text-sm font-extrabold text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-slate-300"
++                >
++                  {salvandoLista ? "Salvando..." : listaEditandoId ? "Salvar Alterações" : "Salvar Lista"}
++                </button>
++                <button
++                  type="button"
++                  onClick={() => {
++                    setMostrarCriarLista(false);
++                    setListaEditandoId(null);
++                    setListaNome("");
++                    setListaRegra("");
++                    setListaTipo("simples");
++                    setListaVisibilidade("privada");
++                    setListaAtiva(true);
++                  }}
++                  className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
++                >
++                  Fechar
++                </button>
++              </div>
++            </div>
++
++            {mensagemLista ? (
++              <p className={`mt-4 text-sm font-semibold ${mensagemLista.includes("Não foi possível") ? "text-red-600" : "text-green-700"}`}>
++                {mensagemLista}
++              </p>
++            ) : null}
++          </form>
++        ) : null}
++
++        {roleUsuario === "staff" ? (
++          <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700">
++            Seu perfil possui acesso focado em check-in e nao permite criar listas.
++          </p>
++        ) : null}
++
++        <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
++          {listasEvento.length === 0 ? (
++            <p className="text-sm text-slate-500">Nenhuma lista criada para este evento.</p>
++          ) : (
++            listasEvento.map((lista) => (
++              <article key={lista.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
++                {(() => {
++                  const visibilidade = (lista.tipo_visibilidade || lista.visibilidade || "privada").toLowerCase();
++                  const listaPublicaAtiva = visibilidade === "publica" && !!lista.ativa;
++
++                  return (
++                    <>
++                <h3 className="text-base font-bold text-blue-900 break-words">{lista.nome}</h3>
++                <p className="mt-1 text-sm text-slate-500">Tipo: {rotuloTipoLista(lista.tipo_lista ?? null)}</p>
++                <p className="mt-1 text-sm text-slate-500">Visibilidade: {rotuloVisibilidadeLista(lista)}</p>
++                <p className="mt-1 text-sm text-slate-500">Regra: {lista.regra || "-"}</p>
++                <p className="mt-1 text-sm text-slate-500">Status: {lista.ativa ? "Ativa" : "Inativa"}</p>
++
++                <div className="mt-2">
++                  {listaPublicaAtiva ? (
++                    <button
++                      type="button"
++                      onClick={() => {
++                        if (!lista.slug) {
++                          setMensagemLista("Esta lista publica ainda nao possui link disponivel.");
++                          return;
++                        }
++
++                        const linkPublico = `${window.location.origin}/evento/${evento.slug}/${lista.slug}`;
++                        navigator.clipboard.writeText(linkPublico);
++                        setMensagemLista("Link publico copiado com sucesso.");
++                      }}
++                      className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-100 px-4 py-2 text-sm font-bold text-emerald-800 transition hover:bg-emerald-200"
++                    >
++                      Copiar Link Público
++                    </button>
++                  ) : (
++                    <span className="inline-flex rounded-xl bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-slate-600">
++                      Lista privada
++                    </span>
++                  )}
++                </div>
++
++                <div className="mt-3 flex flex-wrap gap-2">
++                  <Link
++                    href={`/admin/eventos/${evento.slug}/listas/${lista.id}`}
++                    className="inline-flex min-h-10 items-center justify-center rounded-xl bg-green-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-green-400"
++                  >
++                    Abrir Lista
++                  </Link>
++
++                  {(roleUsuario === "super_admin" || roleUsuario === "produtor") ? (
++                    <>
++                      <button
++                        type="button"
++                        onClick={() => abrirEdicaoLista(lista)}
++                        className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-100 px-4 py-2 text-sm font-bold text-blue-900 transition hover:bg-blue-200"
++                      >
++                        Editar Lista
++                      </button>
++
++                      <button
++                        type="button"
++                        onClick={() => void excluirListaCentral(lista.id)}
++                        className="inline-flex min-h-10 items-center justify-center rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-400"
++                      >
++                        Excluir Lista
++                      </button>
++                    </>
++                  ) : null}
++                </div>
++                    </>
++                  );
++                })()}
++              </article>
++            ))
++          )}
++        </div>
++      </section>
++
++      <section className="p-4 sm:p-6" id="check-in">
+ 
+         {/* CARDS */}
+ 
+-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4 sm:gap-6 mb-8">
++        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 sm:gap-5">
+ 
+-          <div className="bg-white border border-blue-100 rounded-3xl p-6 text-center shadow-sm">
++          <div className="flex min-h-[168px] h-full flex-col items-center justify-center rounded-3xl border border-blue-100 bg-white p-6 text-center shadow-sm">
+ 
+-            <p className="text-slate-500">
++            <p className="min-h-6 text-slate-500">
+               Total Confirmados
+             </p>
+ 
+-            <h2 className="text-4xl sm:text-5xl font-bold text-blue-900 mt-3">
++            <h2 className="mt-3 text-4xl font-bold text-blue-900 sm:text-5xl">
+               {totalConfirmados}
+             </h2>
+ 
+           </div>
+ 
+-          <div className="bg-white border border-green-200 rounded-3xl p-6 text-center shadow-sm">
++          <div className="flex min-h-[168px] h-full flex-col items-center justify-center rounded-3xl border border-green-200 bg-white p-6 text-center shadow-sm">
+ 
+-            <p className="text-slate-500">
++            <p className="min-h-6 text-slate-500">
+               Presentes
+             </p>
+ 
+-            <h2 className="text-4xl sm:text-5xl font-bold text-green-600 mt-3">
++            <h2 className="mt-3 text-4xl font-bold text-green-600 sm:text-5xl">
+               {totalPresentes}
+             </h2>
+ 
+           </div>
+ 
+-          <div className="bg-white border border-amber-200 rounded-3xl p-6 text-center shadow-sm">
++          <div className="flex min-h-[168px] h-full flex-col items-center justify-center rounded-3xl border border-amber-200 bg-white p-6 text-center shadow-sm">
+ 
+-            <p className="text-slate-500">
++            <p className="min-h-6 text-slate-500">
+               Pendentes
+             </p>
+ 
+-            <h2 className="text-4xl sm:text-5xl font-bold text-amber-600 mt-3">
++            <h2 className="mt-3 text-4xl font-bold text-amber-600 sm:text-5xl">
+               {totalPendentes}
+             </h2>
+ 
+           </div>
+ 
+-          <div className="bg-white border border-blue-100 rounded-3xl p-6 text-center shadow-sm">
++          <div className="flex min-h-[168px] h-full flex-col items-center justify-center rounded-3xl border border-blue-100 bg-white p-6 text-center shadow-sm">
+ 
+-            <p className="text-slate-500">
++            <p className="min-h-6 text-slate-500">
+               Comparecimento
+             </p>
+ 
+-            <h2 className="text-4xl sm:text-5xl font-bold text-blue-500 mt-3">
++            <h2 className="mt-3 text-4xl font-bold text-blue-500 sm:text-5xl">
+               {porcentagemComparecimento}%
+             </h2>
+ 
+           </div>
+ 
+-          <div className="bg-white border border-amber-200 rounded-3xl p-6 text-center shadow-sm">
++          <div className="flex min-h-[168px] h-full flex-col items-center justify-center rounded-3xl border border-orange-200 bg-white p-6 text-center shadow-sm">
+ 
+-            <p className="text-slate-500">
++            <p className="min-h-6 text-slate-500">
+               Horário Mais Quente
+             </p>
+ 
+-            <h2 className="text-3xl sm:text-4xl font-bold text-orange-500 mt-3">
++            <h2 className="mt-3 text-3xl font-bold text-orange-500 sm:text-4xl">
+               🔥 {horarioMaisQuente}
+             </h2>
+ 
+@@ -569,17 +1053,26 @@ export default function EventoDashboard() {
+ 
+         {/* BUSCA */}
+ 
+-        <input
+-          type="text"
+-          placeholder="Buscar participante..."
+-          value={busca}
+-          onChange={(e) =>
+-            setBusca(
+-              e.target.value
+-            )
+-          }
+-          className="w-full p-4 rounded-xl bg-white text-black mb-6 text-base"
+-        />
++        <div id="convidados" className="mb-6 rounded-3xl border border-blue-100 bg-white p-5 shadow-sm">
++          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
++            <div>
++              <h2 className="text-2xl font-bold text-blue-900">Convidados e check-in</h2>
++              <p className="mt-1 text-sm text-slate-500">Busque um participante para agilizar o atendimento na porta.</p>
++            </div>
++
++            <input
++              type="text"
++              placeholder="Buscar participante..."
++              value={busca}
++              onChange={(e) =>
++                setBusca(
++                  e.target.value
++                )
++              }
++              className="w-full rounded-xl border border-slate-200 bg-white p-4 text-black text-base md:max-w-md"
++            />
++          </div>
++        </div>
+ 
+         {/* FILTROS */}
+ 
+@@ -801,6 +1294,7 @@ export default function EventoDashboard() {
+ 
+       </section>
+ 
+-    </main>
++      </div>
++    </AdminShell>
+   );
+ }
+\ No newline at end of file
+diff --git a/app/evento/[slug]/page.tsx b/app/evento/[slug]/page.tsx
+index f8c7cba..262f60f 100644
+--- a/app/evento/[slug]/page.tsx
++++ b/app/evento/[slug]/page.tsx
+@@ -1,13 +1,9 @@
+ "use client";
+ 
+ import { useEffect, useState } from "react";
++import Link from "next/link";
+ import { useParams } from "next/navigation";
+-import { createClient } from "@supabase/supabase-js";
+-
+-const supabase = createClient(
+-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+-);
++import { supabase } from "@/lib/supabase";
+ 
+ export default function EventoPage() {
+   const params = useParams();
+@@ -21,6 +17,8 @@ export default function EventoPage() {
+   const [evento, setEvento] =
+     useState<any>(null);
+ 
++  const [listasPublicas, setListasPublicas] = useState<any[]>([]);
++
+   const [nome, setNome] =
+     useState("");
+ 
+@@ -52,6 +50,25 @@ export default function EventoPage() {
+         .single();
+ 
+       setEvento(data);
++
++      if (!data?.id) {
++        setListasPublicas([]);
++        return;
++      }
++
++      const { data: listasData } = await supabase
++        .from("listas_evento")
++        .select("id, nome, regra, slug, tipo_visibilidade, visibilidade, ativa")
++        .eq("evento_id", data.id)
++        .eq("ativa", true)
++        .order("created_at", { ascending: false });
++
++      const listasFiltradas = (listasData || []).filter((lista) => {
++        const visibilidade = (lista.tipo_visibilidade || lista.visibilidade || "privada").toLowerCase();
++        return visibilidade === "publica";
++      });
++
++      setListasPublicas(listasFiltradas);
+     }
+ 
+     carregarEvento();
+@@ -191,6 +208,32 @@ export default function EventoPage() {
+ 
+       {/* FORMULÁRIO */}
+ 
++      <section className="max-w-4xl mx-auto px-4 sm:px-6 py-10">
++        <div className="bg-white border border-blue-100 rounded-3xl p-5 sm:p-8 shadow-sm">
++          <h2 className="text-2xl sm:text-3xl font-bold text-blue-900">Listas Públicas</h2>
++          <p className="mt-2 text-sm sm:text-base text-slate-600">
++            Selecione uma lista pública para realizar cadastro de participantes.
++          </p>
++
++          {listasPublicas.length === 0 ? (
++            <p className="mt-5 text-sm text-slate-500">Nenhuma lista pública ativa disponível no momento.</p>
++          ) : (
++            <div className="mt-5 grid gap-3 sm:grid-cols-2">
++              {listasPublicas.map((lista) => (
++                <Link
++                  key={lista.id}
++                  href={`/evento/${evento.slug}/${lista.slug}`}
++                  className="block rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-blue-300 hover:bg-blue-50"
++                >
++                  <p className="text-base font-bold text-blue-900">{lista.nome}</p>
++                  <p className="mt-1 text-sm text-slate-600">Regra: {lista.regra || "-"}</p>
++                </Link>
++              ))}
++            </div>
++          )}
++        </div>
++      </section>
++
+       <section className="max-w-3xl mx-auto px-4 sm:px-6 py-10 sm:py-16">
+ 
+         <div className="bg-white border border-blue-100 rounded-3xl p-5 sm:p-8 shadow-sm">

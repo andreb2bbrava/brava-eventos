@@ -1,13 +1,23 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+function normalizarVisibilidade(valor: string | null | undefined) {
+  return (valor || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function visibilidadeEhPublica(valor: string | null | undefined) {
+  const normalizado = normalizarVisibilidade(valor);
+  return normalizado === "publica" || normalizado === "lista publica";
+}
 
 export default function EventoPage() {
   const params = useParams();
@@ -20,6 +30,8 @@ export default function EventoPage() {
 
   const [evento, setEvento] =
     useState<any>(null);
+
+  const [listasPublicas, setListasPublicas] = useState<any[]>([]);
 
   const [nome, setNome] =
     useState("");
@@ -52,6 +64,24 @@ export default function EventoPage() {
         .single();
 
       setEvento(data);
+
+      if (!data?.id) {
+        setListasPublicas([]);
+        return;
+      }
+
+      const { data: listasData } = await supabase
+        .from("listas_evento")
+        .select("id, nome, regra, slug, tipo_visibilidade, visibilidade, ativa")
+        .eq("evento_id", data.id)
+        .eq("ativa", true)
+        .order("created_at", { ascending: false });
+
+      const listasFiltradas = (listasData || []).filter((lista) => {
+        return visibilidadeEhPublica(lista.tipo_visibilidade || lista.visibilidade) && !!lista.slug;
+      });
+
+      setListasPublicas(listasFiltradas);
     }
 
     carregarEvento();
@@ -190,6 +220,32 @@ export default function EventoPage() {
       </div>
 
       {/* FORMULÁRIO */}
+
+      <section className="max-w-4xl mx-auto px-4 sm:px-6 py-10">
+        <div className="bg-white border border-blue-100 rounded-3xl p-5 sm:p-8 shadow-sm">
+          <h2 className="text-2xl sm:text-3xl font-bold text-blue-900">Listas Públicas</h2>
+          <p className="mt-2 text-sm sm:text-base text-slate-600">
+            Selecione uma lista pública para realizar cadastro de participantes.
+          </p>
+
+          {listasPublicas.length === 0 ? (
+            <p className="mt-5 text-sm text-slate-500">Nenhuma lista pública ativa disponível no momento.</p>
+          ) : (
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              {listasPublicas.map((lista) => (
+                <Link
+                  key={lista.id}
+                  href={`/evento/${evento.slug}/${lista.slug}`}
+                  className="block rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-blue-300 hover:bg-blue-50"
+                >
+                  <p className="text-base font-bold text-blue-900">{lista.nome}</p>
+                  <p className="mt-1 text-sm text-slate-600">Regra: {lista.regra || "-"}</p>
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
 
       <section className="max-w-3xl mx-auto px-4 sm:px-6 py-10 sm:py-16">
 

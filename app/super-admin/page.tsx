@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import AdminShell from "@/app/components/AdminShell";
 
 type RoleUsuario = "super_admin" | "produtor" | "staff";
 
@@ -35,6 +36,8 @@ export default function SuperAdminPage() {
 
   const [eventos, setEventos] = useState<any[]>([]);
   const [usuarios, setUsuarios] = useState<UsuarioSistema[]>([]);
+  const [buscaEventos, setBuscaEventos] = useState("");
+  const [buscaUsuarios, setBuscaUsuarios] = useState("");
 
   const [novoEmail, setNovoEmail] = useState("");
   const [novaSenha, setNovaSenha] = useState("");
@@ -220,37 +223,56 @@ export default function SuperAdminPage() {
     carregarDados();
   }, []);
 
-  return (
-    <main className="min-h-screen bg-slate-50 text-slate-900 p-4 sm:p-6 overflow-x-hidden">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
-          <div className="flex items-center gap-3">
-            <img
-              src="/logo.png"
-              alt="Brava Entretenimento"
-              className="h-12 w-12 rounded-xl border border-blue-200 bg-white p-1"
-            />
-            <div>
-              <h1 className="text-3xl sm:text-4xl font-extrabold text-blue-900 break-words">Administrador Geral</h1>
-              <p className="text-slate-600 mt-1">Controle completo da plataforma</p>
-            </div>
-          </div>
+  const eventosFiltrados = useMemo(() => {
+    const termo = buscaEventos.trim().toLowerCase();
 
-          <div className="flex flex-wrap gap-3">
-            <Link
-              href="/admin"
-              className="bg-blue-100 hover:bg-blue-200 text-blue-900 px-5 py-3 rounded-2xl font-bold transition"
-            >
-              Ir para Painel
-            </Link>
-            <button
-              onClick={logout}
-              className="bg-red-500 hover:bg-red-400 text-white px-6 py-3 rounded-2xl font-bold transition"
-            >
-              Sair
-            </button>
-          </div>
-        </div>
+    if (!termo) {
+      return eventos;
+    }
+
+    return eventos.filter((evento) => {
+      const nome = String(evento?.nome || "").toLowerCase();
+      const local = String(evento?.local_evento || "").toLowerCase();
+      return nome.includes(termo) || local.includes(termo);
+    });
+  }, [buscaEventos, eventos]);
+
+  const usuariosFiltrados = useMemo(() => {
+    const termo = buscaUsuarios.trim().toLowerCase();
+
+    if (!termo) {
+      return usuarios;
+    }
+
+    return usuarios.filter((usuario) => {
+      const email = usuario.email.toLowerCase();
+      const funcao = roleAmigavel(usuario.role).toLowerCase();
+      return email.includes(termo) || funcao.includes(termo);
+    });
+  }, [buscaUsuarios, usuarios]);
+
+  return (
+    <AdminShell
+      role="super_admin"
+      title="Minha Equipe"
+      subtitle="Gerencie as pessoas que tem acesso a plataforma. Administradores possuem acesso total, produtores gerenciam eventos e staff opera o check-in."
+      breadcrumbs={[{ label: "Inicio", href: "/admin" }, { label: "Minha Equipe" }]}
+      backLink={{ href: "/admin", label: "Voltar para Inicio" }}
+      actions={
+        <button
+          onClick={logout}
+          className="bg-red-500 hover:bg-red-400 text-white px-6 py-3 rounded-2xl font-bold transition min-h-11"
+        >
+          Sair
+        </button>
+      }
+      aside={{
+        title: "Equipe da operacao",
+        description:
+          "Use esta area para distribuir acessos com clareza. Produtores acompanham eventos, staff atua na operacao e o Administrador Geral organiza toda a plataforma.",
+      }}
+    >
+      <div className="space-y-8">
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 mb-8">
           <div className="bg-white border border-blue-100 rounded-3xl p-6 text-center shadow-sm">
@@ -259,7 +281,7 @@ export default function SuperAdminPage() {
           </div>
 
           <div className="bg-white border border-blue-100 rounded-3xl p-6 text-center shadow-sm">
-            <p className="text-slate-500">Total Usuarios</p>
+            <p className="text-slate-500">Total de acessos</p>
             <h2 className="text-5xl font-bold text-blue-800 mt-3">{usuarios.length}</h2>
           </div>
 
@@ -272,10 +294,23 @@ export default function SuperAdminPage() {
         </div>
 
         <div className="bg-white border border-blue-100 rounded-3xl p-6 mb-8 shadow-sm">
-          <h2 className="text-2xl font-bold text-blue-900 mb-4">Eventos</h2>
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-4">
+            <div>
+              <h2 className="text-2xl font-bold text-blue-900">Meus Eventos</h2>
+              <p className="text-sm text-slate-500 mt-1">Pesquise e abra rapidamente a Central do Evento correspondente.</p>
+            </div>
+
+            <input
+              type="text"
+              placeholder="Buscar evento por nome ou local"
+              value={buscaEventos}
+              onChange={(e) => setBuscaEventos(e.target.value)}
+              className="w-full md:max-w-sm rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900"
+            />
+          </div>
 
           <div className="space-y-3">
-            {eventos.map((evento) => (
+            {eventosFiltrados.map((evento) => (
               <div
                 key={evento.id}
                 className="border border-slate-200 rounded-2xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
@@ -289,24 +324,37 @@ export default function SuperAdminPage() {
                   href={`/admin/eventos/${evento.slug}`}
                   className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-2xl font-bold transition text-center"
                 >
-                  Abrir Dashboard
+                  Abrir Central do Evento
                 </Link>
               </div>
             ))}
 
-            {eventos.length === 0 && <p className="text-slate-500">Nenhum evento cadastrado.</p>}
+            {eventosFiltrados.length === 0 && <p className="text-slate-500">Nenhum evento encontrado.</p>}
           </div>
         </div>
 
         <div className="bg-white border border-blue-100 rounded-3xl p-6 shadow-sm">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-5">
-            <h2 className="text-2xl font-bold text-blue-900">Usuarios</h2>
+            <div>
+              <h2 className="text-2xl font-bold text-blue-900">Minha Equipe</h2>
+              <p className="text-sm text-slate-500 mt-1">Encontre rapidamente um perfil e execute a acao correta sem sair do contexto.</p>
+            </div>
             <button
               onClick={criarUsuario}
               className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-2xl font-bold transition"
             >
-              Criar Usuario
+              Novo Acesso
             </button>
+          </div>
+
+          <div className="mb-6">
+            <input
+              type="text"
+              placeholder="Buscar por e-mail ou funcao"
+              value={buscaUsuarios}
+              onChange={(e) => setBuscaUsuarios(e.target.value)}
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900"
+            />
           </div>
 
           <div className="grid md:grid-cols-3 gap-3 mb-6">
@@ -338,7 +386,7 @@ export default function SuperAdminPage() {
           </div>
 
           <div className="space-y-3 md:hidden">
-            {usuarios.map((usuario) => (
+            {usuariosFiltrados.map((usuario) => (
               <article key={usuario.id} className="rounded-2xl border border-slate-200 bg-white p-4">
                 {usuarioEditandoId === usuario.id ? (
                   <div className="space-y-3">
@@ -382,6 +430,12 @@ export default function SuperAdminPage() {
                   </div>
                 ) : (
                   <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.12em] text-emerald-700">
+                        Ativo
+                      </span>
+                      <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{roleAmigavel(usuario.role)}</span>
+                    </div>
                     <p className="font-bold text-slate-900 break-all">{usuario.email}</p>
                     <p className="text-slate-600">{roleAmigavel(usuario.role)}</p>
                     <div className="flex flex-wrap gap-2 pt-1">
@@ -389,14 +443,14 @@ export default function SuperAdminPage() {
                         onClick={() => iniciarEdicao(usuario)}
                         className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl font-semibold min-h-11"
                       >
-                        Editar Usuario
+                        Editar
                       </button>
                       <button
                         onClick={() => excluirUsuario(usuario)}
                         disabled={processandoId === usuario.id}
                         className="bg-red-500 hover:bg-red-400 text-white px-4 py-3 rounded-xl font-semibold min-h-11"
                       >
-                        Excluir Usuario
+                        Excluir
                       </button>
                     </div>
                   </div>
@@ -415,7 +469,7 @@ export default function SuperAdminPage() {
                 </tr>
               </thead>
               <tbody>
-                {usuarios.map((usuario) => (
+                {usuariosFiltrados.map((usuario) => (
                   <tr key={usuario.id} className="border-t border-slate-200">
                     <td className="p-3 text-slate-800">
                       {usuarioEditandoId === usuario.id ? (
@@ -451,7 +505,12 @@ export default function SuperAdminPage() {
                           />
                         </div>
                       ) : (
-                        roleAmigavel(usuario.role)
+                        <div className="space-y-1">
+                          <p className="font-semibold text-slate-800">{roleAmigavel(usuario.role)}</p>
+                          <span className="inline-flex rounded-full bg-emerald-50 px-2 py-1 text-xs font-bold uppercase tracking-[0.12em] text-emerald-700">
+                            Ativo
+                          </span>
+                        </div>
                       )}
                     </td>
 
@@ -478,14 +537,14 @@ export default function SuperAdminPage() {
                             onClick={() => iniciarEdicao(usuario)}
                             className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-xl font-semibold"
                           >
-                            Editar Usuario
+                            Editar
                           </button>
                           <button
                             onClick={() => excluirUsuario(usuario)}
                             disabled={processandoId === usuario.id}
                             className="bg-red-500 hover:bg-red-400 text-white px-3 py-2 rounded-xl font-semibold"
                           >
-                            Excluir Usuario
+                            Excluir
                           </button>
                         </div>
                       )}
@@ -497,6 +556,6 @@ export default function SuperAdminPage() {
           </div>
         </div>
       </div>
-    </main>
+    </AdminShell>
   );
 }

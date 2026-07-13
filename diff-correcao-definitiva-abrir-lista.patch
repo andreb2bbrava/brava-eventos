@@ -1,0 +1,412 @@
+diff --git a/app/admin/eventos/[slug]/listas/[listaId]/page.tsx b/app/admin/eventos/[slug]/listas/[listaId]/page.tsx
+index d94d93c..a6a1dbd 100644
+--- a/app/admin/eventos/[slug]/listas/[listaId]/page.tsx
++++ b/app/admin/eventos/[slug]/listas/[listaId]/page.tsx
+@@ -1,10 +1,11 @@
+ "use client";
+ 
+-import { FormEvent, useCallback, useEffect, useState } from "react";
++import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+ import Link from "next/link";
+ import { useParams } from "next/navigation";
+ import { supabase } from "@/lib/supabase";
+-import { podeEditarEvento } from "@/lib/permissoes";
++import AdminShell from "@/app/components/AdminShell";
++import AdminEventTabs from "@/app/components/AdminEventTabs";
+ 
+ type EventoResumo = {
+   id: number;
+@@ -32,6 +33,25 @@ type ParticipanteLista = {
+   entrada_confirmada_em: string | null;
+ };
+ 
++function normalizarNome(valor: string) {
++  return valor
++    .trim()
++    .toLowerCase()
++    .normalize("NFKD")
++    .replace(/\p{Diacritic}/gu, "")
++    .replace(/\s+/g, " ");
++}
++
++function rotuloTipoLista(tipoLista: string | null) {
++  return tipoLista === "vip" ? "Lista Completa" : "Lista Simples";
++}
++
++function debugLog(...args: unknown[]) {
++  if (process.env.NODE_ENV !== "production") {
++    console.log(...args);
++  }
++}
++
+ export default function ParticipantesDaListaPage() {
+   const params = useParams();
+   const slug =
+@@ -53,10 +73,12 @@ export default function ParticipantesDaListaPage() {
+   const [loading, setLoading] = useState(true);
+   const [acessoNegado, setAcessoNegado] = useState(false);
+   const [mensagemAcesso, setMensagemAcesso] = useState("");
++  const [roleUsuario, setRoleUsuario] = useState<"super_admin" | "produtor" | "staff" | null>(null);
+ 
+   const [evento, setEvento] = useState<EventoResumo | null>(null);
+   const [lista, setLista] = useState<ListaEvento | null>(null);
+   const [participantes, setParticipantes] = useState<ParticipanteLista[]>([]);
++  const [buscaParticipantes, setBuscaParticipantes] = useState("");
+ 
+   const [nomesEmMassa, setNomesEmMassa] = useState("");
+   const [salvandoSimples, setSalvandoSimples] = useState(false);
+@@ -85,7 +107,16 @@ export default function ParticipantesDaListaPage() {
+   }, []);
+ 
+   const carregarDados = useCallback(async () => {
+-    if (!slug || !Number.isFinite(listaId) || listaId <= 0) {
++    debugLog("PARAMS LISTA", { slug, listaId });
++
++    if (!slug) {
++      setAcessoNegado(true);
++      setMensagemAcesso("Evento não encontrado.");
++      setLoading(false);
++      return;
++    }
++
++    if (!Number.isFinite(listaId) || listaId <= 0) {
+       setAcessoNegado(true);
+       setMensagemAcesso("Lista inválida.");
+       setLoading(false);
+@@ -94,25 +125,107 @@ export default function ParticipantesDaListaPage() {
+ 
+     setLoading(true);
+ 
+-    const { autorizado, evento: eventoData, erro } = await podeEditarEvento(slug);
++    const { data: eventoData, error: erroEvento } = await supabase
++      .from("eventos")
++      .select("*")
++      .eq("slug", slug)
++      .single();
++
++    debugLog("EVENTO ENCONTRADO", eventoData);
++    debugLog("ERRO EVENTO", erroEvento);
+ 
+-    if (!autorizado || !eventoData) {
++    if (erroEvento || !eventoData) {
+       setAcessoNegado(true);
+-      setMensagemAcesso(erro || "Você não possui permissão para gerenciar participantes desta lista.");
++      setMensagemAcesso("Evento não encontrado.");
+       setLoading(false);
+       return;
+     }
+ 
+-    const { data: listaData, error: listaError } = await supabase
++    const { data: listaData, error: erroLista } = await supabase
+       .from("listas_evento")
+       .select("id, evento_id, nome, descricao, regra, tipo_lista")
+-      .eq("id", listaId)
++      .eq("id", Number(listaId))
+       .eq("evento_id", eventoData.id)
+-      .maybeSingle();
++      .single();
++
++    debugLog("LISTA ENCONTRADA", listaData);
++    debugLog("ERRO LISTA", erroLista);
++
++    if (erroLista) {
++      const erroPermissaoLista = erroLista.code === "42501" || erroLista.code === "PGRST301";
++      setAcessoNegado(true);
++      setMensagemAcesso(erroPermissaoLista ? "Você não possui permissão para acessar esta lista." : "Lista não encontrada.");
++      setLoading(false);
++      return;
++    }
++
++    if (!listaData) {
++      setAcessoNegado(true);
++      setMensagemAcesso("Lista não encontrada.");
++      setLoading(false);
++      return;
++    }
++
++    const {
++      data: { user },
++      error: erroAuth,
++    } = await supabase.auth.getUser();
++
++    debugLog("USUARIO", user?.id);
++
++    if (erroAuth || !user?.id) {
++      setAcessoNegado(true);
++      setMensagemAcesso("Você não possui permissão para acessar esta lista.");
++      setLoading(false);
++      return;
++    }
++
++    const { data: usuarioData, error: usuarioError } = await supabase
++      .from("usuarios")
++      .select("role")
++      .eq("id", user.id)
++      .single();
++
++    const usuario = usuarioData;
++    debugLog("ROLE", usuario?.role);
++
++    const role = (usuarioData?.role as "super_admin" | "produtor" | "staff" | null) ?? null;
++    setRoleUsuario(role);
++
++    if (usuarioError || !role) {
++      setAcessoNegado(true);
++      setMensagemAcesso("Você não possui permissão para acessar esta lista.");
++      setLoading(false);
++      return;
++    }
++
++    let autorizado = role === "super_admin";
+ 
+-    if (listaError || !listaData) {
++    if (!autorizado && role === "produtor") {
++      const { data: vinculacaoProdutor, error: vinculacaoProdutorError } = await supabase
++        .from("evento_produtores")
++        .select("id")
++        .eq("evento_id", eventoData.id)
++        .eq("usuario_id", user.id)
++        .maybeSingle();
++
++      autorizado = !vinculacaoProdutorError && !!vinculacaoProdutor;
++    }
++
++    if (!autorizado && role === "staff") {
++      const { data: vinculacaoStaff, error: vinculacaoStaffError } = await supabase
++        .from("evento_staff")
++        .select("id")
++        .eq("evento_id", eventoData.id)
++        .eq("usuario_id", user.id)
++        .maybeSingle();
++
++      autorizado = !vinculacaoStaffError && !!vinculacaoStaff;
++    }
++
++    if (!autorizado) {
+       setAcessoNegado(true);
+-      setMensagemAcesso("Lista não encontrada para este evento.");
++      setMensagemAcesso("Você não possui permissão para acessar esta lista.");
+       setLoading(false);
+       return;
+     }
+@@ -154,12 +267,33 @@ export default function ParticipantesDaListaPage() {
+ 
+     setSalvandoSimples(true);
+ 
+-    const payload = nomes.map((nomeLinha) => ({
+-      evento_id: evento.id,
+-      lista_id: lista.id,
+-      nome: nomeLinha,
+-      presente: false,
+-    }));
++    const nomesExistentes = new Set(participantes.map((participante) => normalizarNome(participante.nome || "")));
++    const nomesNovos = new Set<string>();
++    const payload: Array<{ evento_id: number; lista_id: number; nome: string; presente: boolean }> = [];
++    let duplicadosIgnorados = 0;
++
++    nomes.forEach((nomeLinha) => {
++      const nomeNormalizado = normalizarNome(nomeLinha);
++
++      if (!nomeNormalizado || nomesExistentes.has(nomeNormalizado) || nomesNovos.has(nomeNormalizado)) {
++        duplicadosIgnorados += 1;
++        return;
++      }
++
++      nomesNovos.add(nomeNormalizado);
++      payload.push({
++        evento_id: evento.id,
++        lista_id: lista.id,
++        nome: nomeLinha,
++        presente: false,
++      });
++    });
++
++    if (payload.length === 0) {
++      setSalvandoSimples(false);
++      alert("Este nome ja esta cadastrado nesta lista.");
++      return;
++    }
+ 
+     const { error } = await supabase.from("participantes").insert(payload);
+ 
+@@ -173,10 +307,10 @@ export default function ParticipantesDaListaPage() {
+ 
+     setNomesEmMassa("");
+     await carregarParticipantes(evento.id, lista.id);
+-    alert("Participantes importados com sucesso!");
++    alert(`${payload.length} participantes importados. ${duplicadosIgnorados} duplicados ignorados.`);
+   }
+ 
+-  async function adicionarParticipanteVip(e: FormEvent) {
++  async function adicionarParticipanteCompleto(e: FormEvent) {
+     e.preventDefault();
+ 
+     if (!evento || !lista) {
+@@ -184,7 +318,15 @@ export default function ParticipantesDaListaPage() {
+     }
+ 
+     if (!nome.trim()) {
+-      alert("O nome é obrigatório para a lista VIP.");
++      alert("O nome e obrigatorio para a Lista Completa.");
++      return;
++    }
++
++    const nomeNormalizado = normalizarNome(nome);
++    const participanteDuplicado = participantes.some((participante) => normalizarNome(nomeCompleto(participante) || participante.nome || "") === nomeNormalizado || normalizarNome(participante.nome || "") === nomeNormalizado);
++
++    if (participanteDuplicado) {
++      alert("Este nome ja esta cadastrado nesta lista.");
+       return;
+     }
+ 
+@@ -211,7 +353,7 @@ export default function ParticipantesDaListaPage() {
+ 
+     if (error) {
+       console.log(error);
+-      alert("Erro ao adicionar participante VIP.");
++      alert("Erro ao adicionar participante da Lista Completa.");
+       return;
+     }
+ 
+@@ -228,10 +370,6 @@ export default function ParticipantesDaListaPage() {
+     alert("Participante adicionado com sucesso!");
+   }
+ 
+-  const totalCadastrados = participantes.length;
+-  const presentes = participantes.filter((item) => item.presente).length;
+-  const pendentes = totalCadastrados - presentes;
+-
+   function nomeCompleto(participante: ParticipanteLista) {
+     const nomeBase = participante.nome || "";
+     const sobrenomeBase = participante.sobrenome || "";
+@@ -242,6 +380,25 @@ export default function ParticipantesDaListaPage() {
+     return participante.telefone || participante.whatsapp || "-";
+   }
+ 
++  const participantesFiltrados = useMemo(() => {
++    const termo = buscaParticipantes.trim().toLowerCase();
++
++    if (!termo) {
++      return participantes;
++    }
++
++    return participantes.filter((participante) => {
++      const nomeBase = nomeCompleto(participante).toLowerCase();
++      const emailBase = (participante.email || "").toLowerCase();
++      const telefoneBase = telefoneExibicao(participante).toLowerCase();
++      return nomeBase.includes(termo) || emailBase.includes(termo) || telefoneBase.includes(termo);
++    });
++  }, [buscaParticipantes, participantes]);
++
++  const totalCadastrados = participantes.length;
++  const presentes = participantes.filter((item) => item.presente).length;
++  const pendentes = totalCadastrados - presentes;
++
+   if (acessoNegado) {
+     return (
+       <main className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center p-6">
+@@ -268,25 +425,30 @@ export default function ParticipantesDaListaPage() {
+   }
+ 
+   return (
+-    <main className="min-h-screen bg-slate-50 text-slate-900 p-4 sm:p-6 overflow-x-hidden">
+-      <div className="max-w-5xl mx-auto space-y-6">
+-        <div className="flex flex-wrap items-center justify-between gap-3">
+-          <div>
+-            <p className="text-slate-500 text-sm">Evento: {evento.nome}</p>
+-            <h1 className="text-2xl sm:text-3xl font-extrabold text-blue-900 break-words">Participantes da Lista</h1>
+-          </div>
+-
+-          <Link
+-            href={`/admin/eventos/${evento.slug}/editar`}
+-            className="bg-blue-100 hover:bg-blue-200 text-blue-900 px-5 py-3 rounded-2xl font-bold min-h-11 text-center"
+-          >
+-            Voltar para edição
+-          </Link>
+-        </div>
++    <AdminShell
++      role={roleUsuario}
++      title="Convidados da Lista"
++      subtitle={`Gerencie a lista ${lista.nome} com contexto completo do evento ${evento.nome}.`}
++      breadcrumbs={[
++        { label: "Inicio", href: "/admin" },
++        { label: "Meus Eventos", href: "/admin#todos-eventos" },
++        { label: evento.nome, href: `/admin/eventos/${evento.slug}` },
++        { label: "Listas", href: `/admin/eventos/${evento.slug}#listas-evento` },
++        { label: lista.nome },
++      ]}
++      backLink={{ href: `/admin/eventos/${evento.slug}#listas-evento`, label: "Voltar para Listas" }}
++      aside={{
++        title: "Gestao da lista",
++        description:
++          "Nesta tela voce importa nomes, cadastra VIPs individualmente e acompanha quem ja entrou para manter a operacao da porta organizada.",
++      }}
++    >
++      <div className="space-y-6">
++        <AdminEventTabs slug={evento.slug} current="convidados" />
+ 
+         <section className="bg-white border border-blue-100 rounded-3xl p-6 space-y-2 shadow-sm">
+           <p className="text-sm text-slate-600">Nome da lista: <span className="text-slate-900 font-semibold">{lista.nome}</span></p>
+-          <p className="text-sm text-slate-600">Tipo da lista: <span className="text-slate-900 font-semibold uppercase">{lista.tipo_lista || "simples"}</span></p>
++          <p className="text-sm text-slate-600">Tipo da lista: <span className="text-slate-900 font-semibold">{rotuloTipoLista(lista.tipo_lista)}</span></p>
+           <p className="text-sm text-slate-600">Descrição: <span className="text-slate-900">{lista.descricao || "-"}</span></p>
+           <p className="text-sm text-slate-600">Regra: <span className="text-slate-900">{lista.regra || "-"}</span></p>
+         </section>
+@@ -306,6 +468,23 @@ export default function ParticipantesDaListaPage() {
+           </div>
+         </section>
+ 
++        <section className="bg-white border border-blue-100 rounded-3xl p-5 shadow-sm">
++          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
++            <div>
++              <h2 className="text-2xl font-bold text-blue-900">Buscar convidados</h2>
++              <p className="mt-1 text-sm text-slate-500">Filtre por nome, e-mail ou telefone para localizar rapidamente um participante.</p>
++            </div>
++
++            <input
++              type="text"
++              value={buscaParticipantes}
++              onChange={(e) => setBuscaParticipantes(e.target.value)}
++              placeholder="Buscar participante"
++              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 md:max-w-md"
++            />
++          </div>
++        </section>
++
+         {lista.tipo_lista === "simples" ? (
+           <section className="bg-white border border-blue-100 rounded-3xl p-6 shadow-sm">
+             <h2 className="text-2xl font-bold text-blue-900 mb-4">Cadastro em massa</h2>
+@@ -329,9 +508,9 @@ export default function ParticipantesDaListaPage() {
+           </section>
+         ) : (
+           <section className="bg-white border border-blue-100 rounded-3xl p-6 shadow-sm">
+-            <h2 className="text-2xl font-bold text-blue-900 mb-4">Cadastro individual VIP</h2>
++            <h2 className="text-2xl font-bold text-blue-900 mb-4">Cadastro individual da Lista Completa</h2>
+ 
+-            <form onSubmit={adicionarParticipanteVip} className="grid gap-4 md:grid-cols-2">
++            <form onSubmit={adicionarParticipanteCompleto} className="grid gap-4 md:grid-cols-2">
+               <input
+                 type="text"
+                 value={nome}
+@@ -411,11 +590,11 @@ export default function ParticipantesDaListaPage() {
+         <section className="bg-white border border-blue-100 rounded-3xl p-6 shadow-sm">
+           <h2 className="text-2xl font-bold text-blue-900 mb-4">Participantes da Lista</h2>
+ 
+-          {participantes.length === 0 ? (
++          {participantesFiltrados.length === 0 ? (
+             <p className="text-sm text-slate-500">Nenhum participante cadastrado nesta lista.</p>
+           ) : (
+             <div className="space-y-3">
+-              {participantes.map((participante) => (
++              {participantesFiltrados.map((participante) => (
+                 <div
+                   key={participante.id}
+                   className="rounded-2xl border border-slate-200 bg-white p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
+@@ -445,6 +624,6 @@ export default function ParticipantesDaListaPage() {
+           )}
+         </section>
+       </div>
+-    </main>
++    </AdminShell>
+   );
+ }
