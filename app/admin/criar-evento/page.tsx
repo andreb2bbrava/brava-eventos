@@ -17,6 +17,20 @@ function separarDataHora(dataHora: string) {
   return { data: data || "", hora: hora || "" };
 }
 
+function logSupabaseError(contexto: string, error: {
+  message?: string;
+  details?: string;
+  hint?: string;
+  code?: string;
+} | null) {
+  console.error(`ERRO BRUTO ${contexto}:`, error);
+  console.error("MESSAGE:", error?.message);
+  console.error("DETAILS:", error?.details);
+  console.error("HINT:", error?.hint);
+  console.error("CODE:", error?.code);
+  console.error("JSON:", JSON.stringify(error, null, 2));
+}
+
 export default function CriarEventoPage() {
   const router = useRouter();
 
@@ -29,6 +43,7 @@ export default function CriarEventoPage() {
   const [banner, setBanner] = useState<File | null>(null);
   const [salvando, setSalvando] = useState(false);
   const [mensagemSucesso, setMensagemSucesso] = useState("");
+  const [mensagemErro, setMensagemErro] = useState("");
   const [acessoNegado, setAcessoNegado] = useState(false);
   const [roleUsuario, setRoleUsuario] = useState<RoleUsuario | null>(null);
 
@@ -65,6 +80,9 @@ export default function CriarEventoPage() {
   async function criarEvento(e: React.FormEvent) {
     e.preventDefault();
 
+    setMensagemErro("");
+    setMensagemSucesso("");
+
     if (!nome.trim()) {
       alert("Preencha o titulo do evento.");
       return;
@@ -72,6 +90,34 @@ export default function CriarEventoPage() {
 
     if (!inicioEvento) {
       alert("Informe o inicio do evento.");
+      return;
+    }
+
+    if (!terminoEvento) {
+      alert("Informe o termino do evento.");
+      return;
+    }
+
+    if (!localEvento.trim()) {
+      alert("Informe o local do evento.");
+      return;
+    }
+
+    const inicioDate = new Date(inicioEvento);
+    const terminoDate = new Date(terminoEvento);
+
+    if (Number.isNaN(inicioDate.getTime())) {
+      alert("Data/hora de inicio invalida.");
+      return;
+    }
+
+    if (Number.isNaN(terminoDate.getTime())) {
+      alert("Data/hora de termino invalida.");
+      return;
+    }
+
+    if (terminoDate.getTime() <= inicioDate.getTime()) {
+      alert("O termino deve ser posterior ao inicio.");
       return;
     }
 
@@ -86,64 +132,109 @@ export default function CriarEventoPage() {
 
     setSalvando(true);
 
-    const slug = await gerarSlugUnicoEvento({
-      supabase,
-      titulo: nome,
-    });
+    try {
+      const slug = await gerarSlugUnicoEvento({
+        supabase,
+        titulo: nome,
+      });
 
-    if (!slug) {
-      alert("Nao foi possivel gerar o link do evento. Verifique o titulo.");
-      setSalvando(false);
-      return;
-    }
-
-    let bannerUrl: string | null = null;
-
-    if (banner) {
-      const nomeArquivo = `${Date.now()}-${banner.name}`;
-      const { error: erroUpload } = await supabase.storage
-        .from("banners")
-        .upload(nomeArquivo, banner);
-
-      if (erroUpload) {
-        console.log(erroUpload);
-        alert("Erro ao subir banner.");
+      if (!slug) {
+        alert("Nao foi possivel gerar o link do evento. Verifique o titulo.");
         setSalvando(false);
         return;
       }
 
-      const { data } = supabase.storage.from("banners").getPublicUrl(nomeArquivo);
-      bannerUrl = data.publicUrl;
-    }
+      const { data: slugExistente, error: erroSlug } = await supabase
+        .from("eventos")
+        .select("id")
+        .eq("slug", slug)
+        .limit(1);
 
-    const inicio = separarDataHora(inicioEvento);
-    const termino = separarDataHora(terminoEvento);
+      if (erroSlug) {
+        logSupabaseError("VALIDAR SLUG CRIAR EVENTO", erroSlug);
+        setMensagemErro(
+          process.env.NODE_ENV !== "production"
+            ? (erroSlug.message || "Erro ao validar slug do evento.")
+            : "Nao foi possivel criar o evento. Tente novamente."
+        );
+        setSalvando(false);
+        return;
+      }
 
-    const payload = {
-      nome: nome.trim(),
-      slug,
-      criador_id: user.id,
-      descricao: descricao.trim() || null,
-      inicio_evento: inicioEvento ? new Date(inicioEvento).toISOString() : null,
-      termino_evento: terminoEvento ? new Date(terminoEvento).toISOString() : null,
-      data_evento: inicio.data || null,
-      hora_evento: inicio.hora || null,
-      local_evento: localEvento.trim() || null,
-      maps_url: mapsUrl.trim() || null,
-      banner_url: bannerUrl,
-    };
+      if ((slugExistente || []).length > 0) {
+        setMensagemErro("Nao foi possivel gerar um slug unico para este evento. Tente outro titulo.");
+        setSalvando(false);
+        return;
+      }
 
-    const { error } = await supabase.from("eventos").insert([payload]);
+      let bannerUrl: string | null = null;
 
-    if (error) {
-      console.log(error);
-      alert("Erro ao criar evento.");
+      if (banner) {
+        const nomeArquivo = `${Date.now()}-${banner.name}`;
+        const { error: erroUpload } = await supabase.storage
+          .from("banners")
+          .upload(nomeArquivo, banner);
+
+        if (erroUpload) {
+          logSupabaseError("UPLOAD BANNER CRIAR EVENTO", erroUpload);
+          setMensagemErro(
+            process.env.NODE_ENV !== "production"
+              ? (erroUpload.message || "Erro ao subir banner.")
+              : "Nao foi possivel enviar o banner. Tente novamente."
+          );
+          setSalvando(false);
+          return;
+        } else {
+          const { data } = supabase.storage.from("banners").getPublicUrl(nomeArquivo);
+          bannerUrl = data.publicUrl;
+        }
+      }
+
+      const inicio = separarDataHora(inicioEvento);
+      const termino = separarDataHora(terminoEvento);
+
+      const payload = {
+        nome: nome.trim(),
+        slug,
+        criador_id: user.id,
+        descricao: descricao.trim() || null,
+        inicio_evento: inicioDate.toISOString(),
+        termino_evento: terminoDate.toISOString(),
+        data_evento: inicio.data || null,
+        hora_evento: inicio.hora || null,
+        local_evento: localEvento.trim(),
+        maps_url: mapsUrl.trim() || null,
+        banner_url: bannerUrl,
+      };
+
+      console.log("PAYLOAD CRIAR EVENTO:", payload);
+
+      const { error } = await supabase.from("eventos").insert([payload]);
+
+      if (error) {
+        logSupabaseError("CRIAR EVENTO", error);
+
+        const mensagemVisual = process.env.NODE_ENV !== "production"
+          ? (error?.message || "Erro ao criar evento.")
+          : "Nao foi possivel criar o evento. Tente novamente.";
+
+        setMensagemErro(mensagemVisual);
+        setSalvando(false);
+        return;
+      }
+
+      setMensagemSucesso("Evento criado com sucesso.");
+      router.push(`/admin/eventos/${slug}`);
+    } catch (erro) {
+      console.error("EXCEÇÃO AO CRIAR EVENTO:", erro);
+      setMensagemErro(
+        process.env.NODE_ENV !== "production"
+          ? String((erro as Error)?.message || erro || "Erro ao criar evento.")
+          : "Nao foi possivel criar o evento. Tente novamente."
+      );
       setSalvando(false);
       return;
     }
-
-    setMensagemSucesso("Evento criado com sucesso. Agora crie suas listas.");
-    router.push(`/admin/eventos/${slug}?criado=1`);
   }
 
   if (acessoNegado) {
@@ -178,6 +269,12 @@ export default function CriarEventoPage() {
         {mensagemSucesso ? (
           <div className="mb-6 rounded-2xl border border-green-200 bg-green-50 px-4 py-4 text-sm font-semibold text-green-700">
             {mensagemSucesso}
+          </div>
+        ) : null}
+
+        {mensagemErro ? (
+          <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-4 text-sm font-semibold text-red-700">
+            {mensagemErro}
           </div>
         ) : null}
 

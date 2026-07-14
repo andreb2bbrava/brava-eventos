@@ -120,6 +120,7 @@ export default function AdminShell({
 }: AdminShellProps) {
   const pathname = usePathname();
   const [menuAberto, setMenuAberto] = useState(false);
+  const [ajudaAberta, setAjudaAberta] = useState(false);
   const [nomeResolvido, setNomeResolvido] = useState(userName || "Usuario Brava");
 
   const menuItems = useMemo(() => {
@@ -214,6 +215,19 @@ export default function AdminShell({
             </nav>
 
             <div className="border-t border-white/10 px-4 py-4">
+              {aside ? (
+                <button
+                  type="button"
+                  onClick={() => setAjudaAberta(true)}
+                  className="mb-3 flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/10 hover:text-white"
+                >
+                  <span>Ajuda</span>
+                  <span aria-hidden="true" className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/20 text-xs font-bold">
+                    ?
+                  </span>
+                </button>
+              ) : null}
+
               <div className="rounded-2xl bg-white/5 px-4 py-4">
                 <p className="text-sm font-bold text-white break-words">{nomeResolvido}</p>
                 <p className="mt-1 text-xs uppercase tracking-[0.18em] text-blue-200">{roleLabel}</p>
@@ -273,6 +287,22 @@ export default function AdminShell({
                   )
                 )}
 
+                {aside ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAjudaAberta(true);
+                      setMenuAberto(false);
+                    }}
+                    className="flex w-full items-center justify-between rounded-2xl bg-white/5 px-4 py-3 text-sm font-semibold text-slate-200"
+                  >
+                    <span>Ajuda</span>
+                    <span aria-hidden="true" className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/20 text-xs font-bold">
+                      ?
+                    </span>
+                  </button>
+                ) : null}
+
                 <div className="rounded-2xl bg-white/5 px-4 py-4">
                   <p className="text-sm font-bold text-white break-words">{nomeResolvido}</p>
                   <p className="mt-1 text-xs uppercase tracking-[0.18em] text-blue-200">{roleLabel}</p>
@@ -282,62 +312,91 @@ export default function AdminShell({
           </div>
 
           <div className="px-4 py-6 sm:px-6 xl:px-8 2xl:px-10">
-            <div className="flex flex-col gap-6 xl:grid xl:grid-cols-[minmax(0,1fr)_320px] xl:items-start">
-              <div className="min-w-0 space-y-6">
-                <header className="rounded-3xl border border-white/70 bg-white p-6 shadow-[0_20px_60px_rgba(148,163,184,0.16)]">
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                    <div className="min-w-0 space-y-3">
-                      {breadcrumbs.length > 0 ? (
-                        <nav className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
-                          {breadcrumbs.map((item, index) => (
-                            <span key={`${item.label}-${index}`} className="flex items-center gap-2">
-                              {item.href ? (
-                                <Link href={item.href} className="hover:text-blue-700">
-                                  {item.label}
-                                </Link>
-                              ) : (
-                                <span className="font-semibold text-slate-700">{item.label}</span>
-                              )}
-                              {index < breadcrumbs.length - 1 ? <span>/</span> : null}
-                            </span>
-                          ))}
-                        </nav>
-                      ) : null}
+            <div className="min-w-0 space-y-6">
+              <header className="rounded-3xl border border-white/70 bg-white p-6 shadow-[0_20px_60px_rgba(148,163,184,0.16)]">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0 space-y-3">
+                    {breadcrumbs.length > 0 ? (
+                      <nav className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+                        {breadcrumbs.map((item, index) => (
+                          <span key={`${item.label}-${index}`} className="flex items-center gap-2">
+                            {item.href ? (
+                              <Link href={item.href} className="hover:text-blue-700">
+                                {item.label}
+                              </Link>
+                            ) : (
+                              <span className="font-semibold text-slate-700">{item.label}</span>
+                            )}
+                            {index < breadcrumbs.length - 1 ? <span>/</span> : null}
+                          </span>
+                        ))}
+                      </nav>
+                    ) : null}
 
-                      {backLink ? (
-                        <Link
-                          href={backLink.href}
-                          className="inline-flex items-center gap-2 text-sm font-semibold text-blue-700 hover:text-blue-900"
-                        >
-                          <span aria-hidden="true">←</span>
-                          <span>{backLink.label}</span>
-                        </Link>
-                      ) : null}
+                    {backLink ? (
+                      <Link
+                        href={backLink.href}
+                        className="inline-flex items-center gap-2 text-sm font-semibold text-blue-700 hover:text-blue-900"
+                      >
+                        <span aria-hidden="true">←</span>
+                        <span>{backLink.label}</span>
+                      </Link>
+                    ) : null}
 
-                      <div>
-                        <h1 className="text-3xl font-extrabold text-blue-900 sm:text-4xl break-words">{title}</h1>
-                        {subtitle ? <p className="mt-2 max-w-3xl text-slate-600">{subtitle}</p> : null}
-                      </div>
+                    <div>
+                      <h1 className="text-3xl font-extrabold text-blue-900 sm:text-4xl break-words">{title}</h1>
+                      {subtitle ? <p className="mt-2 max-w-4xl text-slate-600">{subtitle}</p> : null}
                     </div>
-
-                    {actions ? <div className="flex flex-wrap gap-3">{actions}</div> : null}
                   </div>
-                </header>
 
-                {children}
-              </div>
+                  <div className="flex flex-wrap gap-3">
+                    {actions}
+                    {aside ? (
+                      <button
+                        type="button"
+                        onClick={() => setAjudaAberta(true)}
+                        className="inline-flex min-h-11 items-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-900 transition hover:bg-blue-100"
+                      >
+                        <span aria-hidden="true" className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-blue-300 text-xs font-bold">
+                          ?
+                        </span>
+                        <span>Guia Rapido</span>
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </header>
 
-              {aside ? (
-                <aside className="rounded-3xl border border-white/70 bg-white p-6 shadow-[0_20px_60px_rgba(148,163,184,0.16)] xl:sticky xl:top-8">
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-700">Guia rapido</p>
-                  <h2 className="mt-3 text-xl font-extrabold text-blue-900">{aside.title}</h2>
-                  <p className="mt-3 text-sm leading-6 text-slate-600">{aside.description}</p>
-                </aside>
-              ) : null}
+              {children}
             </div>
           </div>
         </div>
       </div>
+
+      {aside && ajudaAberta ? (
+        <div className="fixed inset-0 z-50 flex">
+          <button
+            type="button"
+            aria-label="Fechar guia rapido"
+            onClick={() => setAjudaAberta(false)}
+            className="h-full flex-1 bg-slate-900/50"
+          />
+
+          <aside className="h-full w-full max-w-md border-l border-blue-100 bg-white p-6 shadow-[0_24px_80px_rgba(15,23,42,0.32)]">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-700">Guia rapido</p>
+            <h2 className="mt-3 text-2xl font-extrabold text-blue-900">{aside.title}</h2>
+            <p className="mt-4 text-sm leading-7 text-slate-600">{aside.description}</p>
+
+            <button
+              type="button"
+              onClick={() => setAjudaAberta(false)}
+              className="mt-8 inline-flex min-h-11 items-center justify-center rounded-2xl bg-blue-600 px-6 py-3 font-bold text-white transition hover:bg-blue-500"
+            >
+              Fechar
+            </button>
+          </aside>
+        </div>
+      ) : null}
     </div>
   );
 }

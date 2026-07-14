@@ -34,6 +34,20 @@ function separarDataHora(dataHora: string | null) {
   return { data, hora };
 }
 
+function logSupabaseError(contexto: string, error: {
+  message?: string;
+  details?: string;
+  hint?: string;
+  code?: string;
+} | null) {
+  console.error(`ERRO BRUTO ${contexto}:`, error);
+  console.error("MESSAGE:", error?.message);
+  console.error("DETAILS:", error?.details);
+  console.error("HINT:", error?.hint);
+  console.error("CODE:", error?.code);
+  console.error("JSON:", JSON.stringify(error, null, 2));
+}
+
 export default function EditarEventoPage() {
 
   const router = useRouter();
@@ -287,6 +301,39 @@ export default function EditarEventoPage() {
 
     if (!eventoId) return;
 
+    if (!nome.trim()) {
+      alert("Preencha o titulo do evento.");
+      return;
+    }
+
+    if (!inicioEvento) {
+      alert("Informe o inicio do evento.");
+      return;
+    }
+
+    if (!terminoEvento) {
+      alert("Informe o termino do evento.");
+      return;
+    }
+
+    if (!localEvento.trim()) {
+      alert("Informe o local do evento.");
+      return;
+    }
+
+    const inicioDate = new Date(inicioEvento);
+    const terminoDate = new Date(terminoEvento);
+
+    if (Number.isNaN(inicioDate.getTime()) || Number.isNaN(terminoDate.getTime())) {
+      alert("Datas invalidas. Verifique inicio e termino.");
+      return;
+    }
+
+    if (terminoDate.getTime() <= inicioDate.getTime()) {
+      alert("O termino deve ser posterior ao inicio.");
+      return;
+    }
+
     setSalvando(true);
 
     let proximoSlugEvento = (slugEvento || "").trim();
@@ -316,8 +363,8 @@ export default function EditarEventoPage() {
         .upload(nomeArquivo, bannerArquivo);
 
       if (erroUpload) {
-        console.log(erroUpload);
-        alert("Erro ao subir banner do evento.");
+        logSupabaseError("UPLOAD BANNER EDITAR EVENTO", erroUpload);
+        alert(process.env.NODE_ENV !== "production" ? (erroUpload.message || "Erro ao subir banner do evento.") : "Erro ao subir banner do evento.");
         setSalvando(false);
         return;
       }
@@ -326,39 +373,27 @@ export default function EditarEventoPage() {
       proximaBannerUrl = data.publicUrl;
     }
 
-    const partesInicio = inicioEvento ? separarDataHora(new Date(inicioEvento).toISOString()) : { data: dataEvento, hora: horaEvento };
+    const partesInicio = separarDataHora(inicioDate.toISOString());
+
+    const payload = {
+      nome: nome.trim(),
+      slug: proximoSlugEvento,
+      descricao: descricao.trim() || null,
+      inicio_evento: inicioDate.toISOString(),
+      termino_evento: terminoDate.toISOString(),
+      data_evento: partesInicio.data || null,
+      hora_evento: partesInicio.hora || null,
+      local_evento: localEvento.trim(),
+      maps_url: mapsUrl.trim() || null,
+      banner_url: proximaBannerUrl,
+    };
+
+    console.log("PAYLOAD EDITAR EVENTO:", payload);
 
     const { error } =
       await supabase
         .from("eventos")
-        .update({
-
-          nome,
-
-          slug: proximoSlugEvento,
-
-          descricao: descricao.trim() || null,
-
-          inicio_evento: inicioEvento ? new Date(inicioEvento).toISOString() : null,
-
-          termino_evento: terminoEvento ? new Date(terminoEvento).toISOString() : null,
-
-          data_evento:
-            partesInicio.data || null,
-
-          hora_evento:
-            partesInicio.hora || null,
-
-          local_evento:
-            localEvento,
-
-          maps_url:
-            mapsUrl,
-
-          banner_url:
-            proximaBannerUrl,
-
-        })
+        .update(payload)
         .eq(
           "id",
           eventoId
@@ -366,10 +401,10 @@ export default function EditarEventoPage() {
 
     if (error) {
 
-      console.log(error);
+      logSupabaseError("ATUALIZAR EVENTO", error);
 
       alert(
-        "Erro ao atualizar evento."
+        process.env.NODE_ENV !== "production" ? (error.message || "Erro ao atualizar evento.") : "Erro ao atualizar evento."
       );
 
       setSalvando(false);

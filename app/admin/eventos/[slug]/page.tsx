@@ -50,6 +50,15 @@ function normalizarNomeLista(valor: string) {
   return valor.trim().toLowerCase();
 }
 
+function slugListaEhValido(valor: string | null | undefined) {
+  const slug = (valor || "").trim();
+  if (!slug) {
+    return false;
+  }
+
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug);
+}
+
 export default function EventoDashboard() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -93,16 +102,67 @@ export default function EventoDashboard() {
 
   const mostrarMensagemCriacao = useMemo(() => searchParams.get("criado") === "1", [searchParams]);
 
-  async function carregarListas(eventoId: number) {
+  async function garantirSlugsListasLegadas(eventoId: number, listas: ListaEventoResumo[]) {
+    let listasAtualizadas = [...listas];
+
+    for (const lista of listas) {
+      if (slugListaEhValido(lista.slug)) {
+        continue;
+      }
+
+      const slugGerado = await gerarSlugUnicoLista({
+        supabase,
+        titulo: lista.nome || "lista",
+        eventoId,
+        listaIdAtual: lista.id,
+      });
+
+      if (!slugGerado) {
+        continue;
+      }
+
+      const { data: listaAtualizada, error } = await supabase
+        .from("listas_evento")
+        .update({ slug: slugGerado })
+        .eq("id", lista.id)
+        .eq("evento_id", eventoId)
+        .select("*")
+        .single();
+
+      if (error || !listaAtualizada) {
+        console.error("Erro ao gerar slug automático de lista legada:", error);
+        continue;
+      }
+
+      listasAtualizadas = listasAtualizadas.map((item) =>
+        item.id === lista.id ? (listaAtualizada as ListaEventoResumo) : item
+      );
+    }
+
+    return listasAtualizadas;
+  }
+
+  async function carregarListas(eventoId: number, podeCorrigirSlugLegado: boolean) {
     const { data: listasData } = await supabase
       .from("listas_evento")
       .select("*")
       .eq("evento_id", eventoId)
       .order("created_at", { ascending: false });
 
-    if (listasData) {
-      setListasEvento(listasData as ListaEventoResumo[]);
+    if (!listasData) {
+      setListasEvento([]);
+      return;
     }
+
+    const listasBase = listasData as ListaEventoResumo[];
+
+    if (!podeCorrigirSlugLegado) {
+      setListasEvento(listasBase);
+      return;
+    }
+
+    const listasComSlug = await garantirSlugsListasLegadas(eventoId, listasBase);
+    setListasEvento(listasComSlug);
   }
 
   async function carregarDados() {
@@ -143,7 +203,8 @@ export default function EventoDashboard() {
       setParticipantes(data);
     }
 
-    await carregarListas(eventoData.id);
+    const podeCorrigirSlugLegado = role === "super_admin" || role === "produtor";
+    await carregarListas(eventoData.id, podeCorrigirSlugLegado);
   }
 
   async function salvarListaEvento(event: React.FormEvent<HTMLFormElement>) {
@@ -274,7 +335,8 @@ export default function EventoDashboard() {
           setListasEvento((prev) => [listaPersistida, ...prev]);
         }
       } else {
-        await carregarListas(evento.id);
+        const podeCorrigirSlugLegado = roleUsuario === "super_admin" || roleUsuario === "produtor";
+        await carregarListas(evento.id, podeCorrigirSlugLegado);
       }
 
       setListaNome("");
@@ -362,13 +424,14 @@ export default function EventoDashboard() {
     id
   );
 
+  const horarioCheckin = new Date().toISOString();
+
   const { data, error } =
     await supabase
       .from("participantes")
       .update({
         presente: true,
-        entrada_confirmada_em:
-          new Date().toISOString(),
+        entrada_confirmada_em: horarioCheckin,
       })
       .eq("id", id)
       .select();
@@ -405,12 +468,58 @@ export default function EventoDashboard() {
     return;
   }
 
-  await carregarDados();
+  setParticipantes((prev) =>
+    prev.map((item) =>
+      item.id === id
+        ? {
+            ...item,
+            presente: true,
+            entrada_confirmada_em: horarioCheckin,
+          }
+        : item
+    )
+  );
 
   alert(
     "Check-in realizado com sucesso!"
   );
 }
+
+  async function desfazerCheckin(id: number) {
+    const { data, error } = await supabase
+      .from("participantes")
+      .update({
+        presente: false,
+        entrada_confirmada_em: null,
+      })
+      .eq("id", id)
+      .select();
+
+    if (error) {
+      console.error("Erro ao desfazer check-in:", error);
+      alert("Erro ao desfazer check-in: " + error.message);
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      alert("Nenhum participante foi atualizado. Pode ser RLS/permissão ou ID inválido.");
+      return;
+    }
+
+    setParticipantes((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              presente: false,
+              entrada_confirmada_em: null,
+            }
+          : item
+      )
+    );
+
+    alert("Check-in desfeito com sucesso.");
+  }
 
   // EXPORTAR EXCEL
 
@@ -576,6 +685,7 @@ export default function EventoDashboard() {
     return {
       nome: lista?.nome || "Sem lista",
       tipo: lista?.tipo_lista || "simples",
+      regra: (lista?.regra || "").trim() || "Sem regra definida",
     };
   }
 
@@ -988,7 +1098,7 @@ export default function EventoDashboard() {
 
         {/* CARDS */}
 
-        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 sm:gap-5">
+        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5 sm:gap-5">
 
           <div className="flex min-h-[168px] h-full flex-col items-center justify-center rounded-3xl border border-blue-100 bg-white p-6 text-center shadow-sm">
 
@@ -1153,8 +1263,7 @@ export default function EventoDashboard() {
               >
                 <div className="space-y-1">
                   <h3 className="text-lg font-bold text-slate-900 break-words">{participante.nome}</h3>
-                  <p className="text-sm text-slate-600">Lista: {lista.nome}</p>
-                  <p className="text-sm text-slate-600">Tipo: {lista.tipo}</p>
+                  <p className="text-sm text-slate-600">Regra da Lista: {lista.regra}</p>
                   <p className="text-sm text-slate-600">WhatsApp: {participante.whatsapp || "-"}</p>
                   <p className="text-sm text-slate-600">Horário: {participante.entrada_confirmada_em
                     ? new Date(participante.entrada_confirmada_em).toLocaleTimeString("pt-BR", {
@@ -1174,10 +1283,18 @@ export default function EventoDashboard() {
                       onClick={() => fazerCheckin(participante.id)}
                       className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl font-bold min-h-11"
                     >
-                      Confirmar Entrada
+                      Fazer Check-in
                     </button>
                   ) : (
-                    <span className="text-green-600 font-bold">✔ Confirmado</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-green-600 font-bold">✓ Confirmado</span>
+                      <button
+                        onClick={() => desfazerCheckin(participante.id)}
+                        className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+                      >
+                        Desfazer Check-in
+                      </button>
+                    </div>
                   )}
                 </div>
               </article>
@@ -1187,9 +1304,18 @@ export default function EventoDashboard() {
 
         {/* TABELA DESKTOP */}
 
-        <div className="hidden md:block overflow-auto rounded-3xl border border-blue-100 bg-white shadow-sm">
+        <div className="hidden md:block overflow-x-auto rounded-3xl border border-blue-100 bg-white shadow-sm">
 
-          <table className="w-full">
+          <table className="w-full min-w-[1050px] table-fixed">
+
+            <colgroup>
+              <col className="w-[22%]" />
+              <col className="w-[16%]" />
+              <col className="w-[25%]" />
+              <col className="w-[12%]" />
+              <col className="w-[12%]" />
+              <col className="w-[13%]" />
+            </colgroup>
 
             <thead className="bg-blue-50 text-slate-700">
 
@@ -1204,15 +1330,19 @@ export default function EventoDashboard() {
                 </th>
 
                 <th className="p-4 text-left">
-                  Status
+                  Regra da Lista
                 </th>
 
                 <th className="p-4 text-left">
+                  Status
+                </th>
+
+                <th className="p-4 text-left whitespace-nowrap">
                   Horário Entrada
                 </th>
 
                 <th className="p-4 text-left">
-                  Check-in
+                  Ação
                 </th>
 
               </tr>
@@ -1223,6 +1353,11 @@ export default function EventoDashboard() {
 
               {participantesFiltrados.map(
                 (participante) => (
+
+                  (() => {
+                    const lista = infoLista(participante);
+
+                    return (
 
                   <tr
                     key={
@@ -1235,12 +1370,16 @@ export default function EventoDashboard() {
                     }`}
                   >
 
-                    <td className="p-4">
+                    <td className="p-4 break-words">
                       {participante.nome}
                     </td>
 
                     <td className="p-4">
                       {participante.whatsapp || "-"}
+                    </td>
+
+                    <td className="p-4 break-words">
+                      {lista.regra}
                     </td>
 
                     <td className="p-4">
@@ -1277,7 +1416,7 @@ export default function EventoDashboard() {
 
                     </td>
 
-                    <td className="p-4">
+                    <td className="p-4 whitespace-nowrap">
 
                       {!participante.presente ? (
 
@@ -1294,15 +1433,30 @@ export default function EventoDashboard() {
 
                       ) : (
 
-                        <span className="text-green-600 font-bold">
-                          ✔ Confirmado
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-green-600 font-bold">
+                            ✓ Confirmado
+                          </span>
+                          <button
+                            onClick={() =>
+                              desfazerCheckin(
+                                participante.id
+                              )
+                            }
+                            className="rounded-xl border border-slate-300 bg-white px-4 py-2 font-bold text-slate-700 transition hover:bg-slate-50"
+                          >
+                            Desfazer Check-in
+                          </button>
+                        </div>
 
                       )}
 
                     </td>
 
                   </tr>
+
+                    );
+                  })()
 
                 )
               )}

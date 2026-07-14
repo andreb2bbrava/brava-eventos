@@ -10,6 +10,10 @@ type EventoPublico = {
   slug: string;
   nome: string;
   descricao: string | null;
+  inicio_evento: string | null;
+  termino_evento: string | null;
+  data_evento: string | null;
+  hora_evento: string | null;
   banner_url: string | null;
   banner_posicao: string | null;
   local_evento: string | null;
@@ -35,6 +39,59 @@ function normalizarNome(valor: string) {
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, " ");
+}
+
+function formatarDataHora(valor: string | null | undefined) {
+  if (!valor) {
+    return "-";
+  }
+
+  const data = new Date(valor);
+  if (Number.isNaN(data.getTime())) {
+    return valor;
+  }
+
+  return data.toLocaleString("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
+
+function obterInicioEvento(evento: EventoPublico | null) {
+  if (!evento) {
+    return null;
+  }
+
+  return evento.inicio_evento || (evento.data_evento && evento.hora_evento ? `${evento.data_evento}T${evento.hora_evento}` : null);
+}
+
+function normalizarComparacaoTexto(valor: string) {
+  return valor
+    .trim()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function obterRegraExibicao(nomeLista: string | null | undefined, regraLista: string | null | undefined) {
+  const regra = (regraLista || "").trim();
+  if (!regra) {
+    return null;
+  }
+
+  const nomeNormalizado = normalizarComparacaoTexto(nomeLista || "");
+  const regraNormalizada = normalizarComparacaoTexto(regra);
+
+  if (!regraNormalizada) {
+    return null;
+  }
+
+  if (nomeNormalizado === regraNormalizada || nomeNormalizado.includes(regraNormalizada)) {
+    return null;
+  }
+
+  return regra;
 }
 
 function debugLog(...args: unknown[]) {
@@ -255,7 +312,7 @@ export default function ListaPublicaPage() {
       if (payload.length === 0) {
         setSalvando(false);
         setMensagemErro("");
-        setMensagemSucesso("Todos os nomes informados já estão cadastrados nesta lista.");
+        setMensagemSucesso(`0 nomes foram adicionados. ${ignorados} nomes já estavam cadastrados e foram ignorados.`);
         return;
       }
 
@@ -272,7 +329,7 @@ export default function ListaPublicaPage() {
       setNomesEmMassa("");
 
       if (ignorados === 0) {
-        setMensagemSucesso(`Cadastro realizado com sucesso! ${payload.length} nomes foram adicionados à lista.`);
+        setMensagemSucesso(`${payload.length} nomes foram adicionados à lista.`);
         return;
       }
 
@@ -372,14 +429,16 @@ export default function ListaPublicaPage() {
     );
   }
 
+  const regraExibicao = obterRegraExibicao(lista.nome, lista.regra);
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 overflow-x-hidden">
-      <div className="relative min-h-[320px] md:h-[420px] border-b border-blue-100 bg-white">
+      <section className="w-full border-b border-blue-100 bg-white">
         {evento.banner_url ? (
           <img
             src={evento.banner_url}
             alt={evento.nome}
-            className={`w-full h-full object-cover ${
+            className={`w-full h-auto max-h-[600px] object-cover ${
               evento.banner_posicao === "top"
                 ? "object-top"
                 : evento.banner_posicao === "bottom"
@@ -387,31 +446,48 @@ export default function ListaPublicaPage() {
                 : "object-center"
             }`}
           />
-        ) : null}
+        ) : (
+          <div className="h-[220px] sm:h-[320px] w-full bg-blue-100" />
+        )}
+      </section>
 
-        <div className="absolute inset-0 bg-white/65" />
+      <section className="max-w-3xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
+        <h1 className="text-center text-3xl sm:text-5xl font-extrabold text-blue-900 leading-tight break-words">
+          {evento.nome}
+        </h1>
+      </section>
 
-        <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4 sm:p-6">
-          <h1 className="text-3xl sm:text-5xl font-extrabold text-blue-900 break-words">{evento.nome}</h1>
-          {evento.descricao ? <p className="mt-3 max-w-3xl text-slate-700">{evento.descricao}</p> : null}
-          <p className="mt-3 text-base sm:text-lg text-slate-700">Local: {evento.local_evento || "-"}</p>
+      <section className="max-w-3xl mx-auto px-4 sm:px-6">
+        <div className="rounded-3xl border border-blue-100 bg-white p-5 sm:p-7 shadow-sm space-y-2">
+          <p className="text-base sm:text-lg text-slate-700">Início: {formatarDataHora(obterInicioEvento(evento))}</p>
+          <p className="text-base sm:text-lg text-slate-700">Término: {formatarDataHora(evento.termino_evento)}</p>
+          <p className="text-base sm:text-lg text-slate-700 break-words">Local: {evento.local_evento || "-"}</p>
+
           {evento.maps_url ? (
             <a
               href={evento.maps_url}
               target="_blank"
-              className="mt-4 inline-flex min-h-11 items-center justify-center rounded-2xl bg-blue-600 px-6 py-3 font-bold text-white transition hover:bg-blue-500"
+              className="mt-3 inline-flex min-h-11 items-center justify-center rounded-2xl bg-blue-600 px-6 py-3 text-sm sm:text-base font-bold text-white transition hover:bg-blue-500"
             >
               Ver no Google Maps
             </a>
           ) : null}
         </div>
-      </div>
+      </section>
 
-      <section className="max-w-3xl mx-auto px-4 sm:px-6 py-10 sm:py-16">
-        <div className="bg-white border border-blue-100 rounded-3xl p-6 sm:p-8 shadow-sm">
-          <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">{lista.tipo_lista === "vip" ? "Lista Completa" : "Lista Simples"}</p>
-          <h2 className="mt-2 text-2xl sm:text-4xl font-bold text-blue-900">{lista.nome}</h2>
-          <p className="mt-2 text-slate-600">Regra: {lista.regra || "-"}</p>
+      <section className="max-w-3xl mx-auto px-4 sm:px-6 pt-10">
+        <div className="rounded-3xl border border-blue-100 bg-white p-5 sm:p-7 shadow-sm">
+          <h2 className="text-2xl sm:text-3xl font-bold text-blue-900">Sobre o evento</h2>
+          <p className="mt-4 whitespace-pre-line text-left text-base sm:text-lg leading-relaxed text-slate-700">
+            {evento.descricao || "Descrição não informada."}
+          </p>
+        </div>
+      </section>
+
+      <section className="max-w-3xl mx-auto px-4 sm:px-6 py-10 sm:py-12">
+        <div className="rounded-3xl border border-blue-100 bg-white p-6 sm:p-8 shadow-sm">
+          <h2 className="text-2xl sm:text-4xl font-bold text-blue-900 break-words">{lista.nome}</h2>
+          {regraExibicao ? <p className="mt-2 text-slate-600">Regra: {regraExibicao}</p> : null}
 
           <form onSubmit={entrarNaLista} className="mt-6 space-y-4">
             {lista.tipo_lista === "vip" ? (
@@ -478,7 +554,7 @@ export default function ListaPublicaPage() {
               disabled={salvando}
               className="w-full min-h-11 rounded-2xl bg-blue-600 px-6 py-3 font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-slate-300"
             >
-              {salvando ? "Salvando..." : "Entrar na Lista"}
+              {salvando ? "Salvando..." : "Inscreva-se"}
             </button>
           </form>
         </div>

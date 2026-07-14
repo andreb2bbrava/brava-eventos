@@ -19,6 +19,36 @@ function visibilidadeEhPublica(valor: string | null | undefined) {
   return normalizado === "publica" || normalizado === "lista publica";
 }
 
+type ListaPublicaEvento = {
+  id: number;
+  nome: string;
+  regra: string | null;
+  slug: string | null;
+  tipo_visibilidade: string | null;
+  visibilidade: string | null;
+  ativa: boolean;
+};
+
+function formatarDataHora(valor: string | null | undefined) {
+  if (!valor) {
+    return "-";
+  }
+
+  const data = new Date(valor);
+  if (Number.isNaN(data.getTime())) {
+    return valor;
+  }
+
+  return data.toLocaleString("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
+
+function obterInicioEvento(evento: any) {
+  return evento?.inicio_evento || (evento?.data_evento && evento?.hora_evento ? `${evento.data_evento}T${evento.hora_evento}` : null);
+}
+
 export default function EventoPage() {
   const params = useParams();
   const slug =
@@ -28,36 +58,18 @@ export default function EventoPage() {
       ? params.slug[0]
       : "";
 
-  const [evento, setEvento] =
-    useState<any>(null);
-
-  const [listasPublicas, setListasPublicas] = useState<any[]>([]);
-
-  const [nome, setNome] =
-    useState("");
-
-  const [telefone, setTelefone] =
-    useState("");
-
-  const [email, setEmail] =
-    useState("");
-
-  const [listaNomes, setListaNomes] =
-    useState("");
-
-  const [loading, setLoading] =
-    useState(false);
+  const [evento, setEvento] = useState<any>(null);
+  const [listasPublicas, setListasPublicas] = useState<ListaPublicaEvento[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-
     async function carregarEvento() {
       if (!slug) {
+        setLoading(false);
         return;
       }
 
-      const {
-        data,
-      } = await supabase
+      const { data } = await supabase
         .from("eventos")
         .select("*")
         .eq("slug", slug)
@@ -67,12 +79,13 @@ export default function EventoPage() {
 
       if (!data?.id) {
         setListasPublicas([]);
+        setLoading(false);
         return;
       }
 
       const { data: listasData } = await supabase
         .from("listas_evento")
-        .select("id, nome, regra, slug, tipo_visibilidade, visibilidade, ativa")
+        .select("*")
         .eq("evento_id", data.id)
         .eq("ativa", true)
         .order("created_at", { ascending: false });
@@ -81,75 +94,14 @@ export default function EventoPage() {
         return visibilidadeEhPublica(lista.tipo_visibilidade || lista.visibilidade) && !!lista.slug;
       });
 
-      setListasPublicas(listasFiltradas);
+      setListasPublicas(listasFiltradas as ListaPublicaEvento[]);
+      setLoading(false);
     }
 
     carregarEvento();
-
   }, [slug]);
 
-  async function confirmarPresenca() {
-
-    if (!evento) return;
-
-    setLoading(true);
-
-    const convidados =
-      listaNomes
-        .split("\n")
-        .map((nome) =>
-          nome.trim()
-        )
-        .filter(Boolean);
-
-    const participantes = [
-
-      {
-        nome,
-        whatsapp: telefone,
-        email,
-        presente: false,
-        evento_id: evento.id,
-      },
-
-      ...convidados.map(
-        (nome) => ({
-          nome,
-          presente: false,
-          evento_id: evento.id,
-        })
-      ),
-    ];
-
-    const { error } =
-      await supabase
-        .from("participantes")
-        .insert(participantes);
-
-    setLoading(false);
-
-    if (error) {
-
-      console.log(error);
-
-      alert(
-        "Erro ao confirmar presença"
-      );
-
-      return;
-    }
-
-    alert(
-      "Presença confirmada!"
-    );
-
-    setNome("");
-    setTelefone("");
-    setEmail("");
-    setListaNomes("");
-  }
-
-  if (!evento) {
+  if (loading) {
 
     return (
 
@@ -163,167 +115,91 @@ export default function EventoPage() {
     );
   }
 
+  if (!evento) {
+    return (
+      <main className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center px-4">
+        <h1 className="text-2xl sm:text-4xl font-bold text-blue-900 text-center">Evento não encontrado.</h1>
+      </main>
+    );
+  }
+
   return (
 
     <main className="min-h-screen bg-slate-50 text-slate-900 overflow-x-hidden">
+      <section className="w-full border-b border-blue-100 bg-white">
+        {evento.banner_url ? (
+          <img
+            src={evento.banner_url}
+            alt={evento.nome}
+            className={`w-full h-auto max-h-[600px] object-cover ${
+              evento.banner_posicao === "top"
+                ? "object-top"
+                : evento.banner_posicao === "bottom"
+                ? "object-bottom"
+                : "object-center"
+            }`}
+          />
+        ) : (
+          <div className="h-[220px] sm:h-[320px] w-full bg-blue-100" />
+        )}
+      </section>
 
-      {/* BANNER */}
+      <section className="max-w-3xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
+        <h1 className="text-center text-3xl sm:text-5xl font-extrabold text-blue-900 leading-tight break-words">
+          {evento.nome}
+        </h1>
+      </section>
 
-      <div className="relative min-h-[360px] md:h-[500px] border-b border-blue-100 bg-white">
+      <section className="max-w-3xl mx-auto px-4 sm:px-6">
+        <div className="rounded-3xl border border-blue-100 bg-white p-5 sm:p-7 shadow-sm space-y-2">
+          <p className="text-base sm:text-lg text-slate-700">Início: {formatarDataHora(obterInicioEvento(evento))}</p>
+          <p className="text-base sm:text-lg text-slate-700">Término: {formatarDataHora(evento.termino_evento)}</p>
+          <p className="text-base sm:text-lg text-slate-700 break-words">Local: {evento.local_evento || "-"}</p>
 
-        <img
-          src={evento.banner_url}
-          alt={evento.nome}
-          className={`w-full h-full object-cover ${
-            evento.banner_posicao === "top"
-              ? "object-top"
-              : evento.banner_posicao === "bottom"
-              ? "object-bottom"
-              : "object-center"
-          }`}
-        />
-
-        <div className="absolute inset-0 bg-white/60" />
-
-        <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4 sm:p-6">
-
-          <h1 className="text-3xl sm:text-5xl md:text-6xl font-extrabold text-blue-900 mb-4 break-words">
-            {evento.nome}
-          </h1>
-
-          <p className="text-base sm:text-xl md:text-2xl mb-2 text-slate-700">
-            📅 {evento.data_evento}
-          </p>
-
-          <p className="text-base sm:text-xl md:text-2xl mb-2 text-slate-700">
-            🕒 {evento.hora_evento}
-          </p>
-
-          <p className="text-base sm:text-xl md:text-2xl mb-6 text-slate-700 break-words">
-            📍 {evento.local_evento}
-          </p>
-
-          {evento.maps_url && (
-
+          {evento.maps_url ? (
             <a
               href={evento.maps_url}
               target="_blank"
-              className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-2xl font-bold text-base sm:text-lg transition min-h-11"
+              className="mt-3 inline-flex min-h-11 items-center justify-center rounded-2xl bg-blue-600 px-6 py-3 text-sm sm:text-base font-bold text-white transition hover:bg-blue-500"
             >
-              VER LOCALIZAÇÃO
+              Ver no Google Maps
             </a>
-
-          )}
-
+          ) : null}
         </div>
+      </section>
 
-      </div>
-
-      {/* FORMULÁRIO */}
-
-      <section className="max-w-4xl mx-auto px-4 sm:px-6 py-10">
-        <div className="bg-white border border-blue-100 rounded-3xl p-5 sm:p-8 shadow-sm">
-          <h2 className="text-2xl sm:text-3xl font-bold text-blue-900">Listas Públicas</h2>
-          <p className="mt-2 text-sm sm:text-base text-slate-600">
-            Selecione uma lista pública para realizar cadastro de participantes.
+      <section className="max-w-3xl mx-auto px-4 sm:px-6 pt-10">
+        <div className="rounded-3xl border border-blue-100 bg-white p-5 sm:p-7 shadow-sm">
+          <h2 className="text-2xl sm:text-3xl font-bold text-blue-900">Sobre o evento</h2>
+          <p className="mt-4 whitespace-pre-line text-slate-700 leading-relaxed text-base sm:text-lg text-left">
+            {evento.descricao || "Descrição não informada."}
           </p>
+        </div>
+      </section>
 
-          {listasPublicas.length === 0 ? (
-            <p className="mt-5 text-sm text-slate-500">Nenhuma lista pública ativa disponível no momento.</p>
-          ) : (
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              {listasPublicas.map((lista) => (
+      <section className="max-w-3xl mx-auto px-4 sm:px-6 py-10 sm:py-12">
+        {listasPublicas.length === 0 ? (
+          <p className="rounded-2xl border border-slate-200 bg-white p-5 text-sm sm:text-base text-slate-600 shadow-sm">
+            Nenhuma lista disponível para este evento.
+          </p>
+        ) : (
+          <div className="space-y-4">
+            {listasPublicas.map((lista) => (
+              <article key={lista.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <p className="text-xl sm:text-2xl font-bold text-blue-900 break-words">{lista.nome}</p>
+                <p className="mt-2 text-slate-600 text-base">{lista.regra || "Regra não informada."}</p>
+
                 <Link
-                  key={lista.id}
                   href={`/evento/${evento.slug}/${lista.slug}`}
-                  className="block rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-blue-300 hover:bg-blue-50"
+                  className="mt-4 inline-flex min-h-11 items-center justify-center rounded-2xl bg-emerald-600 px-6 py-3 text-sm sm:text-base font-bold text-white transition hover:bg-emerald-500"
                 >
-                  <p className="text-base font-bold text-blue-900">{lista.nome}</p>
-                  <p className="mt-1 text-sm text-slate-600">Regra: {lista.regra || "-"}</p>
+                  Inscreva-se
                 </Link>
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
-
-      <section className="max-w-3xl mx-auto px-4 sm:px-6 py-10 sm:py-16">
-
-        <div className="bg-white border border-blue-100 rounded-3xl p-5 sm:p-8 shadow-sm">
-
-          <h2 className="text-2xl sm:text-4xl font-bold text-center text-blue-900 mb-6 sm:mb-8">
-            Confirmar Presença
-          </h2>
-
-          <div className="space-y-5">
-
-            <input
-              type="text"
-              placeholder="Seu nome"
-              value={nome}
-              onChange={(e) =>
-                setNome(
-                  e.target.value
-                )
-              }
-              className="w-full p-4 rounded-xl border border-slate-200 bg-white text-slate-900"
-            />
-
-            <input
-              type="text"
-              placeholder="Telefone"
-              value={telefone}
-              onChange={(e) =>
-                setTelefone(
-                  e.target.value
-                )
-              }
-              className="w-full p-4 rounded-xl border border-slate-200 bg-white text-slate-900"
-            />
-
-            <input
-              type="email"
-              placeholder="Email"
-              value={email}
-              onChange={(e) =>
-                setEmail(
-                  e.target.value
-                )
-              }
-              className="w-full p-4 rounded-xl border border-slate-200 bg-white text-slate-900"
-            />
-
-            <textarea
-              placeholder="Digite o nome dos amigos (1 por linha)"
-              value={listaNomes}
-              onChange={(e) =>
-                setListaNomes(
-                  e.target.value
-                )
-              }
-              className="w-full p-4 rounded-xl border border-slate-200 bg-white text-slate-900 h-36 sm:h-40"
-            />
-
-            <button
-              onClick={
-                confirmarPresenca
-              }
-              disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-500 text-white p-4 sm:p-5 rounded-xl font-extrabold text-base sm:text-lg min-h-11"
-            >
-
-              {loading
-                ? "CONFIRMANDO..."
-                : "CONFIRMAR PRESENÇA"}
-
-            </button>
-
+              </article>
+            ))}
           </div>
-
-        </div>
-
+        )}
       </section>
-
     </main>
   );
 }
