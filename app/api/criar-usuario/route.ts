@@ -2,89 +2,91 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 const supabaseAdmin = createClient(
-process.env.NEXT_PUBLIC_SUPABASE_URL!,
-process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
+
+type RoleUsuario = "super_admin" | "produtor" | "staff";
+
+function roleValida(role: string): role is RoleUsuario {
+  return role === "super_admin" || role === "produtor" || role === "staff";
+}
+
+function obterToken(request: Request) {
+  const authHeader = request.headers.get("authorization") || "";
+  const [, token] = authHeader.split(" ");
+  return token?.trim() || "";
+}
+
+async function validarSuperAdmin(request: Request) {
+  const token = obterToken(request);
+
+  if (!token) {
+    return { ok: false as const, response: NextResponse.json({ error: "Sessao invalida." }, { status: 401 }) };
+  }
+
+  const { data: authData, error: authError } = await supabaseAdmin.auth.getUser(token);
+
+  if (authError || !authData?.user?.id) {
+    return { ok: false as const, response: NextResponse.json({ error: "Sessao invalida." }, { status: 401 }) };
+  }
+
+  const { data: usuarioData, error: usuarioError } = await supabaseAdmin
+    .from("usuarios")
+    .select("role")
+    .eq("id", authData.user.id)
+    .single();
+
+  if (usuarioError || usuarioData?.role !== "super_admin") {
+    return { ok: false as const, response: NextResponse.json({ error: "Usuario sem permissao." }, { status: 403 }) };
+  }
+
+  return { ok: true as const };
+}
 
 export async function POST(request: Request) {
-try {
-const body = await request.json();
-
-const {
-  email,
-  password,
-  role,
-} = body;
-
-console.log("EMAIL:", email);
-console.log("ROLE:", role);
-
-const {
-  data,
-  error,
-} = await supabaseAdmin.auth.admin.createUser({
-  email,
-  password,
-  email_confirm: true,
-});
-
-console.log("AUTH DATA:", data);
-console.log("AUTH ERROR:", error);
-
-if (error) {
-  return NextResponse.json(
-    {
-      error: error.message,
-    },
-    {
-      status: 400,
+  try {
+    const validacao = await validarSuperAdmin(request);
+    if (!validacao.ok) {
+      return validacao.response;
     }
-  );
-}
 
-const {
-  data: usuarioData,
-  error: erroUsuario,
-} = await supabaseAdmin
-  .from("usuarios")
-  .insert([
-    {
-      id: data.user.id,
+    const body = await request.json();
+    const email = String(body?.email || "").trim();
+    const password = String(body?.password || "");
+    const role = String(body?.role || "").trim();
+    const nome = String(body?.nome || "").trim();
+
+    if (!email || !password || !roleValida(role)) {
+      return NextResponse.json({ error: "Dados invalidos para criar usuario." }, { status: 400 });
+    }
+
+    const { data, error } = await supabaseAdmin.auth.admin.createUser({
       email,
-      role,
-    },
-  ])
-  .select();
+      password,
+      email_confirm: true,
+    });
 
-console.log("USUARIO DATA:", usuarioData);
-console.log("USUARIO ERROR:", erroUsuario);
-
-if (erroUsuario) {
-  return NextResponse.json(
-    {
-      error: erroUsuario.message,
-    },
-    {
-      status: 400,
+    if (error || !data?.user?.id) {
+      return NextResponse.json({ error: error?.message || "Nao foi possivel criar usuario." }, { status: 400 });
     }
-  );
-}
 
-return NextResponse.json({
-  success: true,
-});
+    const { error: erroUsuario } = await supabaseAdmin.from("usuarios").insert([
+      {
+        id: data.user.id,
+        email,
+        role,
+        nome: nome || null,
+      },
+    ]);
 
-} catch (error) {
-console.log("ERRO GERAL:", error);
+    if (erroUsuario) {
+      return NextResponse.json({ error: erroUsuario.message }, { status: 400 });
+    }
 
-return NextResponse.json(
-  {
-    error: "Erro interno",
-  },
-  {
-    status: 500,
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("ERRO GERAL AO CRIAR USUARIO:", error);
+    return NextResponse.json({ error: "Erro interno" }, { status: 500 });
   }
-);
-
-}
 }

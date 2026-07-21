@@ -546,7 +546,7 @@ export default function EditarEventoPage() {
               )
             }
             placeholder="Ex: Brazuca 2026"
-            className="w-full p-4 rounded-xl bg-white text-black border border-slate-200"
+            className="ui-field"
           />
 
           <div>
@@ -555,7 +555,7 @@ export default function EditarEventoPage() {
               value={descricao}
               onChange={(e) => setDescricao(e.target.value)}
               placeholder="Descreva o evento, atracoes, regras e informacoes importantes."
-              className="h-32 w-full rounded-xl border border-slate-200 bg-white p-4 text-black"
+              className="ui-field h-32"
             />
           </div>
 
@@ -566,7 +566,7 @@ export default function EditarEventoPage() {
                 type="datetime-local"
                 value={inicioEvento}
                 onChange={(e) => setInicioEvento(e.target.value)}
-                className="w-full p-4 rounded-xl bg-white text-black border border-slate-200"
+                className="ui-field"
               />
             </div>
 
@@ -576,7 +576,7 @@ export default function EditarEventoPage() {
                 type="datetime-local"
                 value={terminoEvento}
                 onChange={(e) => setTerminoEvento(e.target.value)}
-                className="w-full p-4 rounded-xl bg-white text-black border border-slate-200"
+                className="ui-field"
               />
             </div>
           </div>
@@ -592,7 +592,7 @@ export default function EditarEventoPage() {
                 )
               }
               placeholder="Ex: Caza Brava"
-              className="w-full p-4 rounded-xl bg-white text-black border border-slate-200"
+              className="ui-field"
             />
           </div>
 
@@ -607,7 +607,7 @@ export default function EditarEventoPage() {
                 )
               }
               placeholder="Cole aqui o link do Google Maps"
-              className="w-full p-4 rounded-xl bg-white text-black border border-slate-200"
+              className="ui-field"
             />
           </div>
 
@@ -619,7 +619,7 @@ export default function EditarEventoPage() {
               type="file"
               accept="image/png,image/jpeg"
               onChange={(e) => setBannerArquivo(e.target.files?.[0] || null)}
-              className="w-full p-4 rounded-xl bg-white text-black border border-slate-200"
+              className="ui-field"
             />
             {bannerUrl ? (
               <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">

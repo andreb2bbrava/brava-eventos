@@ -286,7 +286,7 @@ export default function CriarEventoPage() {
               placeholder="Ex: Brazuca 2026"
               value={nome}
               onChange={(e) => setNome(e.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-slate-900"
+              className="ui-field"
             />
           </div>
 
@@ -296,7 +296,7 @@ export default function CriarEventoPage() {
               placeholder="Descreva o evento, atracoes, regras e informacoes importantes."
               value={descricao}
               onChange={(e) => setDescricao(e.target.value)}
-              className="h-36 w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-slate-900"
+              className="ui-field h-36"
             />
           </div>
 
@@ -307,7 +307,7 @@ export default function CriarEventoPage() {
                 type="datetime-local"
                 value={inicioEvento}
                 onChange={(e) => setInicioEvento(e.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-slate-900"
+                className="ui-field"
               />
             </div>
 
@@ -317,7 +317,7 @@ export default function CriarEventoPage() {
                 type="datetime-local"
                 value={terminoEvento}
                 onChange={(e) => setTerminoEvento(e.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-slate-900"
+                className="ui-field"
               />
             </div>
           </div>
@@ -329,7 +329,7 @@ export default function CriarEventoPage() {
               placeholder="Ex: Caza Brava"
               value={localEvento}
               onChange={(e) => setLocalEvento(e.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-slate-900"
+              className="ui-field"
             />
           </div>
 
@@ -340,7 +340,7 @@ export default function CriarEventoPage() {
               placeholder="Cole aqui o link do Google Maps"
               value={mapsUrl}
               onChange={(e) => setMapsUrl(e.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-slate-900"
+              className="ui-field"
             />
           </div>
 
@@ -352,7 +352,7 @@ export default function CriarEventoPage() {
               type="file"
               accept="image/png,image/jpeg"
               onChange={(e) => setBanner(e.target.files?.[0] || null)}
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-slate-900"
+              className="ui-field"
             />
           </div>
 

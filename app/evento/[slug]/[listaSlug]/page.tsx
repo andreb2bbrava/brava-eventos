@@ -4,6 +4,12 @@ import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import {
+  erroEhDuplicidadeParticipante,
+  extrairNomesUnicosPorLinha,
+  mensagemDuplicidadeEvento,
+  normalizarNomeParticipante,
+} from "@/lib/participantes";
 
 type EventoPublico = {
   id: number;
@@ -32,14 +38,13 @@ type ListaPublica = {
   ativa: boolean;
 };
 
-function normalizarNome(valor: string) {
-  return valor
-    .trim()
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ");
-}
+type ParticipanteDuplicidadeRow = {
+  id: number;
+  nome: string | null;
+  nome_normalizado: string | null;
+  lista_id: number | null;
+  listas_evento?: { regra: string | null } | Array<{ regra: string | null }> | null;
+};
 
 function formatarDataHora(valor: string | null | undefined) {
   if (!valor) {
@@ -116,26 +121,35 @@ function logSupabaseError(contexto: string, error: {
   console.error(`[SUPABASE][${contexto}] code:`, error.code || "-");
 }
 
-function extrairNomesUnicosPorLinha(texto: string) {
-  const nomesOriginais: string[] = [];
-  const nomesNormalizados = new Set<string>();
+function obterRegraDuplicada(row: ParticipanteDuplicidadeRow) {
+  if (!row.listas_evento) {
+    return null;
+  }
 
-  texto
-    .split("\n")
-    .map((linha) => linha.trim())
-    .filter(Boolean)
-    .forEach((nomeLinha) => {
-      const nomeNormalizado = normalizarNome(nomeLinha);
+  if (Array.isArray(row.listas_evento)) {
+    return (row.listas_evento[0]?.regra || "").trim() || null;
+  }
 
-      if (!nomeNormalizado || nomesNormalizados.has(nomeNormalizado)) {
-        return;
-      }
+  return (row.listas_evento.regra || "").trim() || null;
+}
 
-      nomesNormalizados.add(nomeNormalizado);
-      nomesOriginais.push(nomeLinha);
-    });
+function criarIndiceParticipantesEvento(participantes: ParticipanteDuplicidadeRow[]) {
+  const nomesExistentes = new Set<string>();
+  const participantePorNome = new Map<string, ParticipanteDuplicidadeRow>();
 
-  return nomesOriginais;
+  participantes.forEach((participante) => {
+    const nomeNormalizado = participante.nome_normalizado || normalizarNomeParticipante(participante.nome || "");
+    if (!nomeNormalizado) {
+      return;
+    }
+
+    nomesExistentes.add(nomeNormalizado);
+    if (!participantePorNome.has(nomeNormalizado)) {
+      participantePorNome.set(nomeNormalizado, participante);
+    }
+  });
+
+  return { nomesExistentes, participantePorNome };
 }
 
 function normalizarVisibilidade(valor: string | null | undefined) {
@@ -273,46 +287,87 @@ export default function ListaPublicaPage() {
       setMensagemErro("");
       setMensagemSucesso("");
 
+      const nomesNormalizadosInformados = nomesValidos
+        .map((nomeLinha) => normalizarNomeParticipante(nomeLinha))
+        .filter(Boolean);
+
+      debugLog("EVENTO PARA VALIDACAO:", evento.id);
+      debugLog("NOMES INFORMADOS:", nomesValidos);
+
       const { data: participantesData, error: erroParticipantes } = await supabase
         .from("participantes")
-        .select("nome")
+        .select("id, nome, nome_normalizado, lista_id, listas_evento(regra)")
         .eq("evento_id", evento.id)
-        .eq("lista_id", lista.id);
+        .in("nome_normalizado", nomesNormalizadosInformados);
 
       if (erroParticipantes) {
-        logSupabaseError("selecionar-participantes-publico-simples", erroParticipantes);
+        const contexto = erroParticipantes?.code === "PGRST204" ? "ERRO TECNICO VALIDACAO DUPLICIDADE (PGRST204)" : "ERRO VALIDACAO DUPLICIDADE";
+        console.error(contexto, {
+          message: erroParticipantes?.message,
+          details: erroParticipantes?.details,
+          hint: erroParticipantes?.hint,
+          code: erroParticipantes?.code,
+          error: erroParticipantes,
+        });
         setSalvando(false);
-        setMensagemErro("Não foi possível concluir o cadastro. Tente novamente.");
+        setMensagemErro("Não foi possível verificar os participantes deste evento. Tente novamente.");
         return;
       }
 
-      const nomesExistentes = new Set(
-        (participantesData || []).map((participante) => normalizarNome(participante.nome || ""))
-      );
+      const participantesExistentes = (participantesData || []) as ParticipanteDuplicidadeRow[];
+      const { nomesExistentes, participantePorNome } = criarIndiceParticipantesEvento(participantesExistentes);
 
-      const payload: Array<{ evento_id: number; lista_id: number; nome: string; presente: boolean }> = [];
+      debugLog("PARTICIPANTES EXISTENTES:", participantesExistentes);
+      debugLog("NOMES NORMALIZADOS EXISTENTES:", Array.from(nomesExistentes));
+
+      const payload: Array<{ evento_id: number; lista_id: number; nome: string; nome_normalizado: string; presente: boolean }> = [];
       let ignorados = 0;
+      const nomesNovos: string[] = [];
+      const duplicados: Array<{ nome: string; participante: ParticipanteDuplicidadeRow | null }> = [];
 
       nomesValidos.forEach((nomeLinha) => {
-        const nomeNormalizado = normalizarNome(nomeLinha);
+        const nomeNormalizado = normalizarNomeParticipante(nomeLinha);
 
-        if (!nomeNormalizado || nomesExistentes.has(nomeNormalizado)) {
+        if (!nomeNormalizado) {
           ignorados += 1;
           return;
         }
+
+        if (nomesExistentes.has(nomeNormalizado)) {
+          duplicados.push({
+            nome: nomeLinha,
+            participante: participantePorNome.get(nomeNormalizado) || null,
+          });
+          ignorados += 1;
+          return;
+        }
+
+        nomesExistentes.add(nomeNormalizado);
+        nomesNovos.push(nomeLinha);
 
         payload.push({
           evento_id: evento.id,
           lista_id: lista.id,
           nome: nomeLinha,
+          nome_normalizado: nomeNormalizado,
           presente: false,
         });
       });
 
+      debugLog("NOMES NOVOS:", nomesNovos);
+      debugLog(
+        "DUPLICADOS REAIS:",
+        duplicados.map((item) => ({
+          nome: item.nome,
+          participanteId: item.participante?.id || null,
+          regra: item.participante ? obterRegraDuplicada(item.participante) : null,
+        }))
+      );
+
       if (payload.length === 0) {
         setSalvando(false);
         setMensagemErro("");
-        setMensagemSucesso(`0 nomes foram adicionados. ${ignorados} nomes já estavam cadastrados e foram ignorados.`);
+        setMensagemSucesso("Todos os nomes informados já estão cadastrados neste evento.");
         return;
       }
 
@@ -322,6 +377,10 @@ export default function ListaPublicaPage() {
 
       if (erroInsert) {
         logSupabaseError("inserir-participantes-publico-simples", erroInsert);
+        if (erroEhDuplicidadeParticipante(erroInsert)) {
+          setMensagemErro("Este nome já está cadastrado neste evento.");
+          return;
+        }
         setMensagemErro("Não foi possível concluir o cadastro. Tente novamente.");
         return;
       }
@@ -329,11 +388,11 @@ export default function ListaPublicaPage() {
       setNomesEmMassa("");
 
       if (ignorados === 0) {
-        setMensagemSucesso(`${payload.length} nomes foram adicionados à lista.`);
+        setMensagemSucesso(`${payload.length} nomes foram adicionados com sucesso.`);
         return;
       }
 
-      setMensagemSucesso(`${payload.length} nomes foram adicionados. ${ignorados} nomes já estavam cadastrados e foram ignorados.`);
+      setMensagemSucesso(`${payload.length} nomes foram adicionados. ${ignorados} nomes já estavam cadastrados neste evento e foram ignorados.`);
       return;
     }
 
@@ -353,25 +412,57 @@ export default function ListaPublicaPage() {
     setMensagemErro("");
     setMensagemSucesso("");
 
+    const nomeNormalizado = normalizarNomeParticipante(nome);
+    const nomesInformados = [nome.trim()];
+
+    debugLog("EVENTO PARA VALIDACAO:", evento.id);
+    debugLog("NOMES INFORMADOS:", nomesInformados);
+
     const { data: participantesData, error: erroParticipantes } = await supabase
       .from("participantes")
-      .select("nome")
+      .select("id, nome, nome_normalizado, lista_id, listas_evento(regra)")
       .eq("evento_id", evento.id)
-      .eq("lista_id", lista.id);
+      .eq("nome_normalizado", nomeNormalizado)
+      .limit(1);
 
     if (erroParticipantes) {
-      logSupabaseError("selecionar-participantes-publico-vip", erroParticipantes);
+      const contexto = erroParticipantes?.code === "PGRST204" ? "ERRO TECNICO VALIDACAO DUPLICIDADE (PGRST204)" : "ERRO VALIDACAO DUPLICIDADE";
+      console.error(contexto, {
+        message: erroParticipantes?.message,
+        details: erroParticipantes?.details,
+        hint: erroParticipantes?.hint,
+        code: erroParticipantes?.code,
+        error: erroParticipantes,
+      });
       setSalvando(false);
-      setMensagemErro("Não foi possível concluir o cadastro. Tente novamente.");
+      setMensagemErro("Não foi possível verificar os participantes deste evento. Tente novamente.");
       return;
     }
 
-    const nomeNovo = normalizarNome(nome);
-    const jaExiste = (participantesData || []).some((participante) => normalizarNome(participante.nome || "") === nomeNovo);
+    const participantesExistentes = (participantesData || []) as ParticipanteDuplicidadeRow[];
+    const duplicado = participantesExistentes[0] || null;
+    const jaExiste = !!duplicado;
+
+    const { nomesExistentes } = criarIndiceParticipantesEvento(participantesExistentes);
+    debugLog("PARTICIPANTES EXISTENTES:", participantesExistentes);
+    debugLog("NOMES NORMALIZADOS EXISTENTES:", Array.from(nomesExistentes));
+    debugLog("NOMES NOVOS:", jaExiste ? [] : nomesInformados);
+    debugLog(
+      "DUPLICADOS REAIS:",
+      jaExiste
+        ? [
+            {
+              nome: nome.trim(),
+              participanteId: duplicado.id,
+              regra: obterRegraDuplicada(duplicado),
+            },
+          ]
+        : []
+    );
 
     if (jaExiste) {
       setSalvando(false);
-      setMensagemErro("Este nome já está cadastrado nesta lista.");
+      setMensagemErro(mensagemDuplicidadeEvento(nome.trim(), obterRegraDuplicada(duplicado)));
       return;
     }
 
@@ -379,6 +470,7 @@ export default function ListaPublicaPage() {
       evento_id: evento.id,
       lista_id: lista.id,
       nome: nome.trim(),
+      nome_normalizado: nomeNormalizado,
       telefone: celular.trim() || null,
       whatsapp: celular.trim() || null,
       email: email.trim() || null,
@@ -393,6 +485,10 @@ export default function ListaPublicaPage() {
 
     if (erroInsert) {
       logSupabaseError("inserir-participante-publico-vip", erroInsert);
+      if (erroEhDuplicidadeParticipante(erroInsert)) {
+        setMensagemErro("Este nome já está cadastrado neste evento.");
+        return;
+      }
       setMensagemErro("Não foi possível concluir o cadastro. Tente novamente.");
       return;
     }
@@ -497,7 +593,7 @@ export default function ListaPublicaPage() {
                   placeholder="Nome"
                   value={nome}
                   onChange={(e) => setNome(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-white p-4 text-slate-900"
+                  className="ui-field"
                 />
 
                 <input
@@ -505,7 +601,7 @@ export default function ListaPublicaPage() {
                   placeholder="Celular"
                   value={celular}
                   onChange={(e) => setCelular(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-white p-4 text-slate-900"
+                  className="ui-field"
                 />
 
                 <input
@@ -513,14 +609,14 @@ export default function ListaPublicaPage() {
                   placeholder="Email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-white p-4 text-slate-900"
+                  className="ui-field"
                 />
 
                 <input
                   type="date"
                   value={dataNascimento}
                   onChange={(e) => setDataNascimento(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-white p-4 text-slate-900"
+                  className="ui-field"
                 />
 
                 <input
@@ -528,7 +624,7 @@ export default function ListaPublicaPage() {
                   placeholder="Sexo"
                   value={sexo}
                   onChange={(e) => setSexo(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-white p-4 text-slate-900"
+                  className="ui-field"
                 />
               </>
             ) : (
@@ -541,7 +637,7 @@ export default function ListaPublicaPage() {
                   value={nomesEmMassa}
                   onChange={(e) => setNomesEmMassa(e.target.value)}
                   rows={9}
-                  className="w-full rounded-xl border border-slate-200 bg-white p-4 text-slate-900"
+                  className="ui-field min-h-[220px]"
                 />
               </>
             )}

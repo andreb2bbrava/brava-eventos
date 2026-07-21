@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { resolverNomeExibicaoUsuario } from "@/lib/usuarios";
 
 type RoleUsuario = "super_admin" | "produtor" | "staff";
 
@@ -85,28 +86,6 @@ function itemAtivo(pathname: string, href?: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-function obterNomeExibicao(email: string | null, metadata: Record<string, unknown> | undefined) {
-  const firstName = typeof metadata?.first_name === "string" ? metadata.first_name.trim() : "";
-  const fullName = typeof metadata?.full_name === "string" ? metadata.full_name.trim() : "";
-
-  if (firstName) {
-    return firstName;
-  }
-
-  if (fullName) {
-    return fullName.split(" ")[0];
-  }
-
-  if (email && email.includes("@")) {
-    const parte = email.split("@")[0].trim();
-    if (parte) {
-      return parte.charAt(0).toUpperCase() + parte.slice(1);
-    }
-  }
-
-  return "Usuario Brava";
-}
-
 export default function AdminShell({
   role,
   userName,
@@ -162,7 +141,19 @@ export default function AdminShell({
         return;
       }
 
-      setNomeResolvido(obterNomeExibicao(user.email ?? null, user.user_metadata));
+      const { data: usuarioData } = await supabase
+        .from("usuarios")
+        .select("nome, email")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      setNomeResolvido(
+        resolverNomeExibicaoUsuario({
+          nome: usuarioData?.nome,
+          email: usuarioData?.email || user.email || null,
+          metadata: user.user_metadata,
+        })
+      );
     }
 
     carregarNome();

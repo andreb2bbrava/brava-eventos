@@ -6,6 +6,12 @@ import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import AdminShell from "@/app/components/AdminShell";
 import AdminEventTabs from "@/app/components/AdminEventTabs";
+import {
+  erroEhDuplicidadeParticipante,
+  extrairNomesUnicosPorLinha,
+  mensagemDuplicidadeEvento,
+  normalizarNomeParticipante,
+} from "@/lib/participantes";
 
 type EventoResumo = {
   id: number;
@@ -31,13 +37,24 @@ type ParticipanteLista = {
   entrada_confirmada_em: string | null;
 };
 
-function normalizarNome(valor: string) {
-  return valor
-    .trim()
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/\p{Diacritic}/gu, "")
-    .replace(/\s+/g, " ");
+type ParticipanteDuplicidadeRow = {
+  id: number;
+  nome: string | null;
+  nome_normalizado: string | null;
+  lista_id: number | null;
+  listas_evento?: { regra: string | null } | Array<{ regra: string | null }> | null;
+};
+
+function obterRegraDuplicada(row: ParticipanteDuplicidadeRow | null | undefined) {
+  if (!row?.listas_evento) {
+    return null;
+  }
+
+  if (Array.isArray(row.listas_evento)) {
+    return (row.listas_evento[0]?.regra || "").trim() || null;
+  }
+
+  return (row.listas_evento.regra || "").trim() || null;
 }
 
 function rotuloTipoLista(tipoLista: string | null) {
@@ -48,6 +65,25 @@ function debugLog(...args: unknown[]) {
   if (process.env.NODE_ENV !== "production") {
     console.log(...args);
   }
+}
+
+function criarIndiceParticipantesEvento(participantes: ParticipanteDuplicidadeRow[]) {
+  const nomesExistentes = new Set<string>();
+  const participantePorNome = new Map<string, ParticipanteDuplicidadeRow>();
+
+  participantes.forEach((participante) => {
+    const nomeNormalizado = participante.nome_normalizado || normalizarNomeParticipante(participante.nome || "");
+    if (!nomeNormalizado) {
+      return;
+    }
+
+    nomesExistentes.add(nomeNormalizado);
+    if (!participantePorNome.has(nomeNormalizado)) {
+      participantePorNome.set(nomeNormalizado, participante);
+    }
+  });
+
+  return { nomesExistentes, participantePorNome };
 }
 
 export default function ParticipantesDaListaPage() {
@@ -83,6 +119,7 @@ export default function ParticipantesDaListaPage() {
   const [salvandoVip, setSalvandoVip] = useState(false);
   const [mensagemCadastro, setMensagemCadastro] = useState("");
   const [erroCadastro, setErroCadastro] = useState(false);
+  const [excluindoParticipanteId, setExcluindoParticipanteId] = useState<number | null>(null);
 
   const [nome, setNome] = useState("");
   const [telefone, setTelefone] = useState("");
@@ -252,6 +289,7 @@ export default function ParticipantesDaListaPage() {
   }, [carregarDados]);
 
   const podeCadastrarParticipante = roleUsuario === "super_admin" || roleUsuario === "produtor";
+  const podeExcluirParticipante = roleUsuario === "super_admin" || roleUsuario === "produtor" || roleUsuario === "staff";
 
   async function importarParticipantesSimples(e: FormEvent) {
     e.preventDefault();
@@ -271,10 +309,7 @@ export default function ParticipantesDaListaPage() {
       return;
     }
 
-    const nomes = nomesEmMassa
-      .split("\n")
-      .map((linha) => linha.trim())
-      .filter(Boolean);
+    const nomes = extrairNomesUnicosPorLinha(nomesEmMassa);
 
     if (nomes.length === 0) {
       setErroCadastro(true);
@@ -284,32 +319,87 @@ export default function ParticipantesDaListaPage() {
 
     setSalvandoSimples(true);
 
-    const nomesExistentes = new Set(participantes.map((participante) => normalizarNome(participante.nome || "")));
-    const nomesNovos = new Set<string>();
-    const payload: Array<{ evento_id: number; lista_id: number; nome: string; presente: boolean }> = [];
+    const nomesNormalizadosInformados = nomes
+      .map((nomeLinha) => normalizarNomeParticipante(nomeLinha))
+      .filter(Boolean);
+
+    debugLog("EVENTO PARA VALIDACAO:", evento.id);
+    debugLog("NOMES INFORMADOS:", nomes);
+
+    const { data: participantesEventoData, error: erroParticipantesEvento } = await supabase
+      .from("participantes")
+      .select("id, nome, nome_normalizado, lista_id, listas_evento(regra)")
+      .eq("evento_id", evento.id)
+      .in("nome_normalizado", nomesNormalizadosInformados);
+
+    if (erroParticipantesEvento) {
+      const contexto = erroParticipantesEvento?.code === "PGRST204" ? "ERRO TECNICO VALIDACAO DUPLICIDADE (PGRST204)" : "ERRO VALIDACAO DUPLICIDADE";
+      console.error(contexto, {
+        message: erroParticipantesEvento?.message,
+        details: erroParticipantesEvento?.details,
+        hint: erroParticipantesEvento?.hint,
+        code: erroParticipantesEvento?.code,
+        error: erroParticipantesEvento,
+      });
+      setSalvandoSimples(false);
+      setErroCadastro(true);
+      setMensagemCadastro("Não foi possível verificar os participantes deste evento. Tente novamente.");
+      return;
+    }
+
+    const participantesExistentes = (participantesEventoData || []) as ParticipanteDuplicidadeRow[];
+    const { nomesExistentes, participantePorNome } = criarIndiceParticipantesEvento(participantesExistentes);
+
+    debugLog("PARTICIPANTES EXISTENTES:", participantesExistentes);
+    debugLog("NOMES NORMALIZADOS EXISTENTES:", Array.from(nomesExistentes));
+
+    const nomesNovos: string[] = [];
+    const payload: Array<{ evento_id: number; lista_id: number; nome: string; nome_normalizado: string; presente: boolean }> = [];
     let duplicadosIgnorados = 0;
+    const duplicados: Array<{ nome: string; participante: ParticipanteDuplicidadeRow | null }> = [];
 
     nomes.forEach((nomeLinha) => {
-      const nomeNormalizado = normalizarNome(nomeLinha);
+      const nomeNormalizado = normalizarNomeParticipante(nomeLinha);
 
-      if (!nomeNormalizado || nomesExistentes.has(nomeNormalizado) || nomesNovos.has(nomeNormalizado)) {
+      if (!nomeNormalizado) {
         duplicadosIgnorados += 1;
         return;
       }
 
-      nomesNovos.add(nomeNormalizado);
+      if (nomesExistentes.has(nomeNormalizado)) {
+        duplicados.push({
+          nome: nomeLinha,
+          participante: participantePorNome.get(nomeNormalizado) || null,
+        });
+        duplicadosIgnorados += 1;
+        return;
+      }
+
+      nomesExistentes.add(nomeNormalizado);
+      nomesNovos.push(nomeLinha);
       payload.push({
         evento_id: evento.id,
         lista_id: lista.id,
         nome: nomeLinha,
+        nome_normalizado: nomeNormalizado,
         presente: false,
       });
     });
 
+    debugLog("NOMES NOVOS:", nomesNovos);
+    debugLog(
+      "DUPLICADOS REAIS:",
+      duplicados.map((item) => ({
+        nome: item.nome,
+        participanteId: item.participante?.id || null,
+        regra: item.participante ? obterRegraDuplicada(item.participante) : null,
+      }))
+    );
+
     if (payload.length === 0) {
       setSalvandoSimples(false);
-      setErroCadastro(true);
-      setMensagemCadastro("Este nome já está cadastrado nesta lista.");
+      setErroCadastro(false);
+      setMensagemCadastro("Todos os nomes informados já estão cadastrados neste evento.");
       return;
     }
 
@@ -328,9 +418,12 @@ export default function ParticipantesDaListaPage() {
   console.error("PAYLOAD ENVIADO:", payload);
 
   setErroCadastro(true);
-  setMensagemCadastro(
-    `Erro real: ${error.message || "Erro ao importar participantes desta lista."}`
-  );
+  if (erroEhDuplicidadeParticipante(error)) {
+    setMensagemCadastro("Este nome ja esta cadastrado neste evento.");
+    return;
+  }
+
+  setMensagemCadastro("Não foi possível concluir o cadastro. Tente novamente.");
 
   return;
 }
@@ -338,7 +431,12 @@ export default function ParticipantesDaListaPage() {
     setNomesEmMassa("");
     await carregarParticipantes(evento.id, lista.id);
     setErroCadastro(false);
-    setMensagemCadastro(`${payload.length} participantes importados. ${duplicadosIgnorados} duplicados ignorados.`);
+    if (duplicadosIgnorados === 0) {
+      setMensagemCadastro(`${payload.length} nomes foram adicionados com sucesso.`);
+      return;
+    }
+
+    setMensagemCadastro(`${payload.length} nomes foram adicionados. ${duplicadosIgnorados} nomes já estavam cadastrados neste evento e foram ignorados.`);
   }
 
   async function adicionarParticipanteCompleto(e: FormEvent) {
@@ -365,12 +463,55 @@ export default function ParticipantesDaListaPage() {
       return;
     }
 
-    const nomeNormalizado = normalizarNome(nome);
-    const participanteDuplicado = participantes.some((participante) => normalizarNome(participante.nome || "") === nomeNormalizado);
+    const nomeNormalizado = normalizarNomeParticipante(nome);
+
+    debugLog("EVENTO PARA VALIDACAO:", evento.id);
+    debugLog("NOMES INFORMADOS:", [nome.trim()]);
+
+    const { data: participanteDuplicadoData, error: erroDuplicidade } = await supabase
+      .from("participantes")
+      .select("id, nome, nome_normalizado, lista_id, listas_evento(regra)")
+      .eq("evento_id", evento.id)
+      .eq("nome_normalizado", nomeNormalizado)
+      .limit(1);
+
+    if (erroDuplicidade) {
+      const contexto = erroDuplicidade?.code === "PGRST204" ? "ERRO TECNICO VALIDACAO DUPLICIDADE (PGRST204)" : "ERRO VALIDACAO DUPLICIDADE";
+      console.error(contexto, {
+        message: erroDuplicidade?.message,
+        details: erroDuplicidade?.details,
+        hint: erroDuplicidade?.hint,
+        code: erroDuplicidade?.code,
+        error: erroDuplicidade,
+      });
+      setErroCadastro(true);
+      setMensagemCadastro("Não foi possível verificar os participantes deste evento. Tente novamente.");
+      return;
+    }
+
+    const participantesExistentes = (participanteDuplicadoData || []) as ParticipanteDuplicidadeRow[];
+    const participanteDuplicado = participantesExistentes[0] || null;
+
+    const { nomesExistentes } = criarIndiceParticipantesEvento(participantesExistentes);
+    debugLog("PARTICIPANTES EXISTENTES:", participantesExistentes);
+    debugLog("NOMES NORMALIZADOS EXISTENTES:", Array.from(nomesExistentes));
+    debugLog("NOMES NOVOS:", participanteDuplicado ? [] : [nome.trim()]);
+    debugLog(
+      "DUPLICADOS REAIS:",
+      participanteDuplicado
+        ? [
+            {
+              nome: nome.trim(),
+              participanteId: participanteDuplicado.id,
+              regra: obterRegraDuplicada(participanteDuplicado),
+            },
+          ]
+        : []
+    );
 
     if (participanteDuplicado) {
       setErroCadastro(true);
-      setMensagemCadastro("Este nome já está cadastrado nesta lista.");
+      setMensagemCadastro(mensagemDuplicidadeEvento(nome.trim(), obterRegraDuplicada(participanteDuplicado)));
       return;
     }
 
@@ -380,6 +521,7 @@ const payload = {
   evento_id: evento.id,
   lista_id: lista.id,
   nome: nome.trim(),
+  nome_normalizado: nomeNormalizado,
   whatsapp: telefone.trim() || null,
   email: email.trim() || null,
   presente: false,
@@ -399,6 +541,12 @@ const payload = {
       console.error("Erro participante code:", error?.code);
       console.error("Erro participante JSON:", JSON.stringify(error, null, 2));
       console.error("Payload participante:", payload);
+      if (erroEhDuplicidadeParticipante(error)) {
+        setErroCadastro(true);
+        setMensagemCadastro("Este nome ja esta cadastrado neste evento.");
+        return;
+      }
+
       setErroCadastro(true);
       setMensagemCadastro("Erro ao adicionar participante da Lista Completa.");
       return;
@@ -422,6 +570,55 @@ const payload = {
   function telefoneExibicao(participante: ParticipanteLista) {
   return participante.whatsapp || "-";
 }
+
+  async function excluirParticipante(participante: ParticipanteLista) {
+    if (!evento || !podeExcluirParticipante) {
+      return;
+    }
+
+    const confirmou = confirm(
+      `Deseja excluir ${participante.nome} deste evento? Esta acao removera o participante e seu historico de check-in.`
+    );
+
+    if (!confirmou) {
+      return;
+    }
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      alert("Sua sessao expirou. Faca login novamente.");
+      return;
+    }
+
+    setExcluindoParticipanteId(participante.id);
+
+    const response = await fetch("/api/participantes", {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        participanteId: participante.id,
+        eventoId: evento.id,
+      }),
+    });
+
+    const result = await response.json();
+    setExcluindoParticipanteId(null);
+
+    if (!response.ok || result.error) {
+      alert(result.error || "Nao foi possivel excluir participante.");
+      return;
+    }
+
+    setParticipantes((prev) => prev.filter((item) => item.id !== participante.id));
+    setErroCadastro(false);
+    setMensagemCadastro("Participante excluido com sucesso.");
+  }
 
   const participantesFiltrados = useMemo(() => {
     const termo = buscaParticipantes.trim().toLowerCase();
@@ -525,7 +722,7 @@ const payload = {
               value={buscaParticipantes}
               onChange={(e) => setBuscaParticipantes(e.target.value)}
               placeholder="Buscar participante"
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 md:max-w-md"
+              className="ui-field md:max-w-md"
             />
           </div>
         </section>
@@ -551,7 +748,7 @@ const payload = {
                 value={nomesEmMassa}
                 onChange={(e) => setNomesEmMassa(e.target.value)}
                 placeholder="Digite um nome por linha"
-                className="w-full p-4 rounded-xl bg-white text-black h-48"
+                className="ui-field h-48"
                 disabled={!podeCadastrarParticipante || salvandoSimples}
               />
 
@@ -586,7 +783,7 @@ const payload = {
                 value={nome}
                 onChange={(e) => setNome(e.target.value)}
                 placeholder="Nome *"
-                className="w-full p-4 rounded-xl bg-white text-black"
+                className="ui-field"
                 disabled={!podeCadastrarParticipante || salvandoVip}
               />
 
@@ -595,7 +792,7 @@ const payload = {
                 value={telefone}
                 onChange={(e) => setTelefone(e.target.value)}
                 placeholder="Telefone / WhatsApp"
-                className="w-full p-4 rounded-xl bg-white text-black"
+                className="ui-field"
                 disabled={!podeCadastrarParticipante || salvandoVip}
               />
 
@@ -604,7 +801,7 @@ const payload = {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="Email"
-                className="w-full p-4 rounded-xl bg-white text-black"
+                className="ui-field"
                 disabled={!podeCadastrarParticipante || salvandoVip}
               />
 
@@ -613,7 +810,7 @@ const payload = {
                 value={dataNascimento}
                 onChange={(e) => setDataNascimento(e.target.value)}
                 placeholder="Data de nascimento"
-                className="w-full p-4 rounded-xl bg-white text-black"
+                className="ui-field"
                 disabled={!podeCadastrarParticipante || salvandoVip}
               />
 
@@ -622,7 +819,7 @@ const payload = {
                 value={sexo}
                 onChange={(e) => setSexo(e.target.value)}
                 placeholder="Sexo"
-                className="w-full p-4 rounded-xl bg-white text-black"
+                className="ui-field"
                 disabled={!podeCadastrarParticipante || salvandoVip}
               />
 
@@ -670,6 +867,17 @@ const payload = {
                         : "-"}
                     </p>
                   </div>
+
+                  {podeExcluirParticipante ? (
+                    <button
+                      type="button"
+                      onClick={() => void excluirParticipante(participante)}
+                      disabled={excluindoParticipanteId === participante.id}
+                      className="mt-2 inline-flex min-h-11 items-center justify-center rounded-xl border border-red-300 bg-red-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-400 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    >
+                      {excluindoParticipanteId === participante.id ? "Excluindo..." : "Excluir participante"}
+                    </button>
+                  ) : null}
                 </div>
               ))}
             </div>

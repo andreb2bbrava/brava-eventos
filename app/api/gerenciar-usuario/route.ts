@@ -12,36 +12,123 @@ function roleValida(role: string): role is RoleUsuario {
   return role === "super_admin" || role === "produtor" || role === "staff";
 }
 
+function obterToken(request: Request) {
+  const authHeader = request.headers.get("authorization") || "";
+  const [, token] = authHeader.split(" ");
+  return token?.trim() || "";
+}
+
+async function autenticarSolicitante(request: Request): Promise<
+  | { ok: true; usuario: { id: string; role: RoleUsuario } }
+  | { ok: false; response: NextResponse }
+> {
+  const token = obterToken(request);
+
+  if (!token) {
+    return { ok: false, response: NextResponse.json({ error: "Sessao invalida." }, { status: 401 }) };
+  }
+
+  const { data: authData, error: authError } = await supabaseAdmin.auth.getUser(token);
+
+  if (authError || !authData?.user?.id) {
+    return { ok: false, response: NextResponse.json({ error: "Sessao invalida." }, { status: 401 }) };
+  }
+
+  const { data: usuarioData, error: usuarioError } = await supabaseAdmin
+    .from("usuarios")
+    .select("id, role")
+    .eq("id", authData.user.id)
+    .single();
+
+  const role = usuarioData?.role;
+  if (usuarioError || !usuarioData?.id || !roleValida(role)) {
+    return { ok: false, response: NextResponse.json({ error: "Usuario sem permissao." }, { status: 403 }) };
+  }
+
+  return {
+    ok: true,
+    usuario: {
+      id: usuarioData.id,
+      role,
+    },
+  };
+}
+
 export async function PATCH(request: Request) {
   try {
+    const auth = await autenticarSolicitante(request);
+    if (!auth.ok) {
+      return auth.response;
+    }
+
     const body = await request.json();
     const userId = body?.userId as string | undefined;
-    const email = body?.email as string | undefined;
+    const email = typeof body?.email === "string" ? body.email.trim() : undefined;
     const password = body?.password as string | null | undefined;
     const role = body?.role as string | undefined;
+    const nome = typeof body?.nome === "string" ? body.nome.trim() : undefined;
 
-    if (!userId || !email || !role || !roleValida(role)) {
+    if (!userId) {
       return NextResponse.json({ error: "Dados invalidos para atualizar usuario." }, { status: 400 });
     }
 
-    const authPayload: { email: string; password?: string } = { email };
+    const solicitante = auth.usuario;
+    const superAdmin = solicitante.role === "super_admin";
+    const editandoProprioUsuario = solicitante.id === userId;
 
-    if (password && password.trim()) {
-      authPayload.password = password.trim();
+    if (!superAdmin) {
+      const tentandoAlterarCamposRestritos = typeof email !== "undefined" || typeof role !== "undefined" || !!(password && password.trim());
+      if (!editandoProprioUsuario || tentandoAlterarCamposRestritos) {
+        return NextResponse.json({ error: "Usuario sem permissao para atualizar estes dados." }, { status: 403 });
+      }
     }
 
-    const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(userId, authPayload);
+    if (superAdmin && typeof role !== "undefined" && !roleValida(role)) {
+      return NextResponse.json({ error: "Role invalida." }, { status: 400 });
+    }
 
-    if (authError) {
-      return NextResponse.json({ error: authError.message }, { status: 400 });
+    if (superAdmin && (typeof email !== "undefined" || (password && password.trim()))) {
+      const authPayload: { email?: string; password?: string } = {};
+
+      if (typeof email !== "undefined") {
+        if (!email) {
+          return NextResponse.json({ error: "Email invalido." }, { status: 400 });
+        }
+        authPayload.email = email;
+      }
+
+      if (password && password.trim()) {
+        authPayload.password = password.trim();
+      }
+
+      const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(userId, authPayload);
+
+      if (authError) {
+        return NextResponse.json({ error: authError.message }, { status: 400 });
+      }
+    }
+
+    const updatePayload: { email?: string; role?: RoleUsuario; nome?: string | null } = {};
+
+    if (superAdmin && typeof email !== "undefined") {
+      updatePayload.email = email;
+    }
+
+    if (superAdmin && typeof role !== "undefined" && roleValida(role)) {
+      updatePayload.role = role;
+    }
+
+    if (typeof nome !== "undefined") {
+      updatePayload.nome = nome || null;
+    }
+
+    if (Object.keys(updatePayload).length === 0) {
+      return NextResponse.json({ success: true });
     }
 
     const { error: usuarioError } = await supabaseAdmin
       .from("usuarios")
-      .update({
-        email,
-        role,
-      })
+      .update(updatePayload)
       .eq("id", userId);
 
     if (usuarioError) {
@@ -57,6 +144,15 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
+    const auth = await autenticarSolicitante(request);
+    if (!auth.ok) {
+      return auth.response;
+    }
+
+    if (auth.usuario.role !== "super_admin") {
+      return NextResponse.json({ error: "Usuario sem permissao." }, { status: 403 });
+    }
+
     const body = await request.json();
     const userId = body?.userId as string | undefined;
 

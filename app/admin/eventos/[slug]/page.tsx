@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 import { podeEditarEvento, validarAcessoEvento } from "@/lib/permissoes";
 import AdminShell from "@/app/components/AdminShell";
 import AdminEventTabs from "@/app/components/AdminEventTabs";
+import CopyLinkButton from "@/app/components/CopyLinkButton";
 import { gerarSlugUnicoLista } from "@/lib/slug";
 
 import * as XLSX from "xlsx";
@@ -99,6 +100,8 @@ export default function EventoDashboard() {
   const [listaEditandoId, setListaEditandoId] = useState<number | null>(null);
   const [salvandoLista, setSalvandoLista] = useState(false);
   const [mensagemLista, setMensagemLista] = useState("");
+  const [mensagemParticipante, setMensagemParticipante] = useState<{ tipo: "sucesso" | "erro"; texto: string } | null>(null);
+  const [processandoParticipanteId, setProcessandoParticipanteId] = useState<number | null>(null);
 
   const mostrarMensagemCriacao = useMemo(() => searchParams.get("criado") === "1", [searchParams]);
 
@@ -416,109 +419,129 @@ export default function EventoDashboard() {
     }
   }
 
-  async function fazerCheckin(
-  id: number
-) {
-  console.log(
-    "CHECK-IN INICIADO:",
-    id
-  );
-
-  const horarioCheckin = new Date().toISOString();
-
-  const { data, error } =
-    await supabase
-      .from("participantes")
-      .update({
-        presente: true,
-        entrada_confirmada_em: horarioCheckin,
-      })
-      .eq("id", id)
-      .select();
-
-  console.log(
-    "CHECK-IN DATA:",
-    data
-  );
-
-  console.log(
-    "CHECK-IN ERROR:",
-    error
-  );
-
-  if (error) {
-    console.error(
-      "Erro ao realizar check-in:",
-      error
-    );
-
-    alert(
-      "Erro ao fazer check-in: " +
-      error.message
-    );
-
-    return;
-  }
-
-  if (!data || data.length === 0) {
-    alert(
-      "Nenhum participante foi atualizado. Pode ser RLS/permissão ou ID inválido."
-    );
-
-    return;
-  }
-
-  setParticipantes((prev) =>
-    prev.map((item) =>
-      item.id === id
-        ? {
-            ...item,
-            presente: true,
-            entrada_confirmada_em: horarioCheckin,
-          }
-        : item
-    )
-  );
-
-  alert(
-    "Check-in realizado com sucesso!"
-  );
-}
-
-  async function desfazerCheckin(id: number) {
-    const { data, error } = await supabase
-      .from("participantes")
-      .update({
-        presente: false,
-        entrada_confirmada_em: null,
-      })
-      .eq("id", id)
-      .select();
-
-    if (error) {
-      console.error("Erro ao desfazer check-in:", error);
-      alert("Erro ao desfazer check-in: " + error.message);
+  async function atualizarCheckinParticipante(id: number, action: "checkin" | "undo-checkin") {
+    if (!evento?.id) {
       return;
     }
 
-    if (!data || data.length === 0) {
-      alert("Nenhum participante foi atualizado. Pode ser RLS/permissão ou ID inválido.");
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      setMensagemParticipante({ tipo: "erro", texto: "Sua sessao expirou. Faca login novamente." });
       return;
     }
+
+    setProcessandoParticipanteId(id);
+
+    const response = await fetch("/api/participantes", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        participanteId: id,
+        eventoId: evento.id,
+        action,
+      }),
+    });
+
+    const result = await response.json();
+    setProcessandoParticipanteId(null);
+
+    if (!response.ok || result.error) {
+      setMensagemParticipante({ tipo: "erro", texto: result.error || "Nao foi possivel atualizar o check-in." });
+      return;
+    }
+
+    const participanteAtualizado = result.participante as { id: number; presente: boolean; entrada_confirmada_em: string | null };
 
     setParticipantes((prev) =>
       prev.map((item) =>
-        item.id === id
+        item.id === participanteAtualizado.id
           ? {
               ...item,
-              presente: false,
-              entrada_confirmada_em: null,
+              presente: participanteAtualizado.presente,
+              entrada_confirmada_em: participanteAtualizado.entrada_confirmada_em,
             }
           : item
       )
     );
 
-    alert("Check-in desfeito com sucesso.");
+    setMensagemParticipante({
+      tipo: "sucesso",
+      texto: action === "checkin" ? "Check-in realizado com sucesso!" : "Check-in desfeito com sucesso.",
+    });
+  }
+
+  async function fazerCheckin(id: number) {
+    await atualizarCheckinParticipante(id, "checkin");
+  }
+
+  async function desfazerCheckin(id: number) {
+    const participante = participantes.find((item) => item.id === id);
+
+    if (!participante) {
+      return;
+    }
+
+    if (!confirm(`Deseja desfazer o check-in de ${participante.nome}?`)) {
+      return;
+    }
+
+    await atualizarCheckinParticipante(id, "undo-checkin");
+  }
+
+  async function excluirParticipante(id: number) {
+    if (!evento?.id) {
+      return;
+    }
+
+    const participante = participantes.find((item) => item.id === id);
+
+    if (!participante) {
+      return;
+    }
+
+    if (!confirm(`Deseja excluir ${participante.nome} deste evento? Esta acao removera o participante e seu historico de check-in.`)) {
+      return;
+    }
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      setMensagemParticipante({ tipo: "erro", texto: "Sua sessao expirou. Faca login novamente." });
+      return;
+    }
+
+    setProcessandoParticipanteId(id);
+
+    const response = await fetch("/api/participantes", {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        participanteId: id,
+        eventoId: evento.id,
+      }),
+    });
+
+    const result = await response.json();
+    setProcessandoParticipanteId(null);
+
+    if (!response.ok || result.error) {
+      setMensagemParticipante({ tipo: "erro", texto: result.error || "Nao foi possivel excluir participante." });
+      return;
+    }
+
+    setParticipantes((prev) => prev.filter((item) => item.id !== id));
+    setMensagemParticipante({ tipo: "sucesso", texto: "Participante excluido com sucesso." });
   }
 
   // EXPORTAR EXCEL
@@ -876,19 +899,12 @@ export default function EventoDashboard() {
     Página Pública
   </a>
 
-  <button
-    onClick={() => {
-
-      navigator.clipboard.writeText(
-        `${window.location.origin}/evento/${evento.slug}`
-      );
-
-      alert("Link copiado!");
-    }}
+  <CopyLinkButton
+    link={() => `${window.location.origin}/evento/${evento.slug}`}
+    idleLabel="Copiar Link"
+    copiedLabel="Copiado ✓"
     className="bg-green-500 hover:bg-green-400 text-white px-5 py-3 rounded-2xl font-bold transition min-h-11"
-  >
-    Copiar Link
-  </button>
+  />
 
 </div>
 
@@ -924,7 +940,7 @@ export default function EventoDashboard() {
                   value={listaNome}
                   onChange={(e) => setListaNome(e.target.value)}
                   placeholder="Nome da lista"
-                  className="w-full rounded-xl border border-slate-200 bg-white p-3 text-black"
+                  className="ui-field"
                 />
               </div>
 
@@ -933,7 +949,7 @@ export default function EventoDashboard() {
                 <select
                   value={listaTipo}
                   onChange={(e) => setListaTipo(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-white p-3 text-black"
+                  className="ui-field"
                 >
                   <option value="simples">Lista Simples</option>
                   <option value="vip">Lista Completa</option>
@@ -945,7 +961,7 @@ export default function EventoDashboard() {
                 <select
                   value={listaVisibilidade}
                   onChange={(e) => setListaVisibilidade(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-white p-3 text-black"
+                  className="ui-field"
                 >
                   <option value="publica">Lista Pública</option>
                   <option value="privada">Lista Privada</option>
@@ -959,7 +975,7 @@ export default function EventoDashboard() {
                   value={listaRegra}
                   onChange={(e) => setListaRegra(e.target.value)}
                   placeholder="Ex: VIP, Entrada ate 22h"
-                  className="w-full rounded-xl border border-slate-200 bg-white p-3 text-black"
+                  className="ui-field"
                 />
               </div>
 
@@ -991,7 +1007,7 @@ export default function EventoDashboard() {
                     setListaVisibilidade("privada");
                     setListaAtiva(true);
                   }}
-                  className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+                  className="ui-btn-secondary inline-flex min-h-11 items-center justify-center rounded-2xl px-5 py-3 text-sm font-bold transition"
                 >
                   Fechar
                 </button>
@@ -1033,17 +1049,12 @@ export default function EventoDashboard() {
 
                 <div className="mt-2">
                   {listaPublicaAtivaComSlug ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const linkPublico = `${window.location.origin}/evento/${evento.slug}/${lista.slug}`;
-                        navigator.clipboard.writeText(linkPublico);
-                        setMensagemLista("Link público copiado com sucesso.");
-                      }}
+                    <CopyLinkButton
+                      link={() => `${window.location.origin}/evento/${evento.slug}/${lista.slug}`}
+                      idleLabel="Copiar Link Público"
+                      copiedLabel="Copiado ✓"
                       className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-100 px-4 py-2 text-sm font-bold text-emerald-800 transition hover:bg-emerald-200"
-                    >
-                      Copiar Link Público
-                    </button>
+                    />
                   ) : listaPublica && !!lista.ativa && !lista.slug ? (
                     <p className="text-sm font-semibold text-amber-700">Esta lista ainda não possui link público.</p>
                   ) : !listaPublica ? (
@@ -1200,10 +1211,22 @@ export default function EventoDashboard() {
                   e.target.value
                 )
               }
-              className="w-full rounded-xl border border-slate-200 bg-white p-4 text-black text-base md:max-w-md"
+              className="ui-field text-base md:max-w-md"
             />
           </div>
         </div>
+
+        {mensagemParticipante ? (
+          <p
+            className={`mb-6 rounded-2xl border px-4 py-3 text-sm font-semibold ${
+              mensagemParticipante.tipo === "erro"
+                ? "border-red-200 bg-red-50 text-red-700"
+                : "border-green-200 bg-green-50 text-green-700"
+            }`}
+          >
+            {mensagemParticipante.texto}
+          </p>
+        ) : null}
 
         {/* FILTROS */}
 
@@ -1213,10 +1236,8 @@ export default function EventoDashboard() {
             onClick={() =>
               setFiltro("todos")
             }
-            className={`px-4 sm:px-5 py-3 rounded-xl font-bold transition min-h-11 ${
-              filtro === "todos"
-                ? "bg-blue-600 text-white"
-                : "bg-white text-slate-700 border border-slate-200"
+            className={`ui-toggle-btn px-4 sm:px-5 py-3 rounded-xl font-bold transition min-h-11 ${
+              filtro === "todos" ? "ui-toggle-btn-active" : ""
             }`}
           >
             Todos
@@ -1226,10 +1247,8 @@ export default function EventoDashboard() {
             onClick={() =>
               setFiltro("presentes")
             }
-            className={`px-4 sm:px-5 py-3 rounded-xl font-bold transition min-h-11 ${
-              filtro === "presentes"
-                ? "bg-green-500 text-white"
-                : "bg-white text-slate-700 border border-slate-200"
+            className={`ui-toggle-btn px-4 sm:px-5 py-3 rounded-xl font-bold transition min-h-11 ${
+              filtro === "presentes" ? "ui-toggle-btn-active" : ""
             }`}
           >
             Presentes
@@ -1239,10 +1258,8 @@ export default function EventoDashboard() {
             onClick={() =>
               setFiltro("pendentes")
             }
-            className={`px-4 sm:px-5 py-3 rounded-xl font-bold transition min-h-11 ${
-              filtro === "pendentes"
-                ? "bg-amber-500 text-white"
-                : "bg-white text-slate-700 border border-slate-200"
+            className={`ui-toggle-btn px-4 sm:px-5 py-3 rounded-xl font-bold transition min-h-11 ${
+              filtro === "pendentes" ? "ui-toggle-btn-active" : ""
             }`}
           >
             Pendentes
@@ -1281,6 +1298,7 @@ export default function EventoDashboard() {
                   {!participante.presente ? (
                     <button
                       onClick={() => fazerCheckin(participante.id)}
+                      disabled={processandoParticipanteId === participante.id}
                       className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl font-bold min-h-11"
                     >
                       Fazer Check-in
@@ -1290,12 +1308,24 @@ export default function EventoDashboard() {
                       <span className="text-green-600 font-bold">✓ Confirmado</span>
                       <button
                         onClick={() => desfazerCheckin(participante.id)}
+                        disabled={processandoParticipanteId === participante.id}
                         className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
                       >
                         Desfazer Check-in
                       </button>
                     </div>
                   )}
+                </div>
+
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={() => void excluirParticipante(participante.id)}
+                    disabled={processandoParticipanteId === participante.id}
+                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-red-300 bg-red-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-400 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  >
+                    Excluir participante
+                  </button>
                 </div>
               </article>
             );
@@ -1426,6 +1456,7 @@ export default function EventoDashboard() {
                               participante.id
                             )
                           }
+                          disabled={processandoParticipanteId === participante.id}
                           className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-xl font-bold transition"
                         >
                           Fazer Check-in
@@ -1443,6 +1474,7 @@ export default function EventoDashboard() {
                                 participante.id
                               )
                             }
+                            disabled={processandoParticipanteId === participante.id}
                             className="rounded-xl border border-slate-300 bg-white px-4 py-2 font-bold text-slate-700 transition hover:bg-slate-50"
                           >
                             Desfazer Check-in
@@ -1450,6 +1482,17 @@ export default function EventoDashboard() {
                         </div>
 
                       )}
+
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          onClick={() => void excluirParticipante(participante.id)}
+                          disabled={processandoParticipanteId === participante.id}
+                          className="inline-flex min-h-10 items-center justify-center rounded-xl border border-red-300 bg-red-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-400 disabled:cursor-not-allowed disabled:bg-slate-300"
+                        >
+                          Excluir participante
+                        </button>
+                      </div>
 
                     </td>
 

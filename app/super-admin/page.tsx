@@ -5,11 +5,13 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import AdminShell from "@/app/components/AdminShell";
+import { resolverNomeExibicaoUsuario } from "@/lib/usuarios";
 
 type RoleUsuario = "super_admin" | "produtor" | "staff";
 
 type UsuarioSistema = {
   id: string;
+  nome: string | null;
   email: string;
   role: RoleUsuario;
   created_at?: string;
@@ -31,6 +33,13 @@ function roleAmigavel(role: string) {
   return role;
 }
 
+function nomeCompletoUsuario(usuario: UsuarioSistema) {
+  return resolverNomeExibicaoUsuario({
+    nome: usuario.nome,
+    email: usuario.email,
+  });
+}
+
 export default function SuperAdminPage() {
   const router = useRouter();
 
@@ -40,14 +49,17 @@ export default function SuperAdminPage() {
   const [buscaUsuarios, setBuscaUsuarios] = useState("");
 
   const [novoEmail, setNovoEmail] = useState("");
+  const [novoNome, setNovoNome] = useState("");
   const [novaSenha, setNovaSenha] = useState("");
   const [novaRole, setNovaRole] = useState<RoleUsuario>("produtor");
 
   const [usuarioEditandoId, setUsuarioEditandoId] = useState<string | null>(null);
+  const [nomeEdicao, setNomeEdicao] = useState("");
   const [emailEdicao, setEmailEdicao] = useState("");
   const [senhaEdicao, setSenhaEdicao] = useState("");
   const [roleEdicao, setRoleEdicao] = useState<RoleUsuario>("produtor");
   const [processandoId, setProcessandoId] = useState<string | null>(null);
+  const [nomeUsuarioLogado, setNomeUsuarioLogado] = useState("Usuario Brava");
 
   async function carregarDados() {
     const {
@@ -64,6 +76,14 @@ export default function SuperAdminPage() {
       .select("*")
       .eq("id", user.id)
       .single();
+
+    setNomeUsuarioLogado(
+      resolverNomeExibicaoUsuario({
+        nome: usuario?.nome,
+        email: usuario?.email || user.email || null,
+        metadata: user.user_metadata,
+      })
+    );
 
     if (usuario?.role !== "super_admin") {
       router.push("/admin");
@@ -104,12 +124,23 @@ export default function SuperAdminPage() {
       return;
     }
 
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      alert("Sua sessao expirou. Faca login novamente.");
+      return;
+    }
+
     const response = await fetch("/api/criar-usuario", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
       },
       body: JSON.stringify({
+        nome: novoNome.trim() || null,
         email: novoEmail,
         password: novaSenha,
         role: novaRole,
@@ -126,6 +157,7 @@ export default function SuperAdminPage() {
     alert("Usuario criado com sucesso!");
 
     setNovoEmail("");
+  setNovoNome("");
     setNovaSenha("");
     setNovaRole("produtor");
 
@@ -134,6 +166,7 @@ export default function SuperAdminPage() {
 
   function iniciarEdicao(usuario: UsuarioSistema) {
     setUsuarioEditandoId(usuario.id);
+    setNomeEdicao(usuario.nome || "");
     setEmailEdicao(usuario.email);
     setSenhaEdicao("");
     setRoleEdicao(usuario.role);
@@ -141,6 +174,7 @@ export default function SuperAdminPage() {
 
   function cancelarEdicao() {
     setUsuarioEditandoId(null);
+    setNomeEdicao("");
     setEmailEdicao("");
     setSenhaEdicao("");
     setRoleEdicao("produtor");
@@ -156,15 +190,26 @@ export default function SuperAdminPage() {
       return;
     }
 
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      alert("Sua sessao expirou. Faca login novamente.");
+      return;
+    }
+
     setProcessandoId(usuarioEditandoId);
 
     const response = await fetch("/api/gerenciar-usuario", {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
       },
       body: JSON.stringify({
         userId: usuarioEditandoId,
+        nome: nomeEdicao.trim() || null,
         email: emailEdicao.trim(),
         password: senhaEdicao.trim() || null,
         role: roleEdicao,
@@ -192,10 +237,21 @@ export default function SuperAdminPage() {
 
     setProcessandoId(usuario.id);
 
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      setProcessandoId(null);
+      alert("Sua sessao expirou. Faca login novamente.");
+      return;
+    }
+
     const response = await fetch("/api/gerenciar-usuario", {
       method: "DELETE",
       headers: {
         "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
       },
       body: JSON.stringify({
         userId: usuario.id,
@@ -245,15 +301,17 @@ export default function SuperAdminPage() {
     }
 
     return usuarios.filter((usuario) => {
+      const nome = String(usuario.nome || "").toLowerCase();
       const email = usuario.email.toLowerCase();
       const funcao = roleAmigavel(usuario.role).toLowerCase();
-      return email.includes(termo) || funcao.includes(termo);
+      return nome.includes(termo) || email.includes(termo) || funcao.includes(termo);
     });
   }, [buscaUsuarios, usuarios]);
 
   return (
     <AdminShell
       role="super_admin"
+      userName={nomeUsuarioLogado}
       title="Minha Equipe"
       subtitle="Gerencie as pessoas que tem acesso a plataforma. Administradores possuem acesso total, produtores gerenciam eventos e staff opera o check-in."
       breadcrumbs={[{ label: "Inicio", href: "/admin" }, { label: "Minha Equipe" }]}
@@ -350,19 +408,27 @@ export default function SuperAdminPage() {
           <div className="mb-6">
             <input
               type="text"
-              placeholder="Buscar por e-mail ou funcao"
+              placeholder="Buscar por nome, e-mail ou funcao"
               value={buscaUsuarios}
               onChange={(e) => setBuscaUsuarios(e.target.value)}
               className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900"
             />
           </div>
 
-          <div className="grid md:grid-cols-3 gap-3 mb-6">
+          <div className="grid md:grid-cols-4 gap-3 mb-6">
             <input
               type="email"
               placeholder="E-mail"
               value={novoEmail}
               onChange={(e) => setNovoEmail(e.target.value)}
+              className="p-3 rounded-xl border border-slate-300 bg-white text-slate-900"
+            />
+
+            <input
+              type="text"
+              placeholder="Nome completo"
+              value={novoNome}
+              onChange={(e) => setNovoNome(e.target.value)}
               className="p-3 rounded-xl border border-slate-300 bg-white text-slate-900"
             />
 
@@ -390,6 +456,13 @@ export default function SuperAdminPage() {
               <article key={usuario.id} className="rounded-2xl border border-slate-200 bg-white p-4">
                 {usuarioEditandoId === usuario.id ? (
                   <div className="space-y-3">
+                    <input
+                      type="text"
+                      value={nomeEdicao}
+                      onChange={(e) => setNomeEdicao(e.target.value)}
+                      placeholder="Nome completo"
+                      className="w-full p-3 rounded-lg border border-slate-300"
+                    />
                     <input
                       type="email"
                       value={emailEdicao}
@@ -437,6 +510,7 @@ export default function SuperAdminPage() {
                       <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{roleAmigavel(usuario.role)}</span>
                     </div>
                     <p className="font-bold text-slate-900 break-all">{usuario.email}</p>
+                    <p className="text-slate-700 font-semibold">{nomeCompletoUsuario(usuario)}</p>
                     <p className="text-slate-600">{roleAmigavel(usuario.role)}</p>
                     <div className="flex flex-wrap gap-2 pt-1">
                       <button
@@ -463,6 +537,7 @@ export default function SuperAdminPage() {
             <table className="min-w-full border border-slate-200 rounded-2xl overflow-hidden">
               <thead className="bg-blue-50 text-slate-700">
                 <tr>
+                  <th className="text-left p-3">Nome completo</th>
                   <th className="text-left p-3">Email</th>
                   <th className="text-left p-3">Funcao</th>
                   <th className="text-left p-3">Acoes</th>
@@ -471,6 +546,19 @@ export default function SuperAdminPage() {
               <tbody>
                 {usuariosFiltrados.map((usuario) => (
                   <tr key={usuario.id} className="border-t border-slate-200">
+                    <td className="p-3 text-slate-800">
+                      {usuarioEditandoId === usuario.id ? (
+                        <input
+                          type="text"
+                          value={nomeEdicao}
+                          onChange={(e) => setNomeEdicao(e.target.value)}
+                          className="w-full p-2 rounded-lg border border-slate-300"
+                        />
+                      ) : (
+                        nomeCompletoUsuario(usuario)
+                      )}
+                    </td>
+
                     <td className="p-3 text-slate-800">
                       {usuarioEditandoId === usuario.id ? (
                         <input

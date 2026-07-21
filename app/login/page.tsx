@@ -73,7 +73,7 @@ export default function LoginPage() {
             placeholder="Seu e-mail"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full p-4 rounded-xl border border-slate-200 bg-white text-slate-900"
+            className="ui-field"
           />
 
           <input
@@ -81,7 +81,7 @@ export default function LoginPage() {
             placeholder="Sua senha"
             value={senha}
             onChange={(e) => setSenha(e.target.value)}
-            className="w-full p-4 rounded-xl border border-slate-200 bg-white text-slate-900"
+            className="ui-field"
           />
 
           <button
