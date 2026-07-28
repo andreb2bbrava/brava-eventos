@@ -237,7 +237,9 @@ export default function ListaPublicaPage() {
         .from("eventos")
         .select("*")
         .eq("slug", slug)
-        .single();
+        .order("id", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
       debugLog("EVENTO PUBLICO", eventoData);
       debugLog("ERRO EVENTO PUBLICO", erroEvento);
@@ -248,7 +250,7 @@ export default function ListaPublicaPage() {
         return;
       }
 
-      const { data: listaData, error: erroLista } = await supabase
+      let { data: listaData, error: erroLista } = await supabase
         .from("listas_evento")
         .select(
           `
@@ -266,7 +268,35 @@ export default function ListaPublicaPage() {
         )
         .eq("evento_id", eventoData.id)
         .eq("slug", listaSlug)
-        .single();
+        .order("id", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (erroLista && /meta_pixel_id/i.test(erroLista.message || "")) {
+        const fallback = await supabase
+          .from("listas_evento")
+          .select(
+            `
+              id,
+              evento_id,
+              nome,
+              slug,
+              regra,
+              tipo_lista,
+              tipo_visibilidade,
+              visibilidade,
+              ativa
+            `
+          )
+          .eq("evento_id", eventoData.id)
+          .eq("slug", listaSlug)
+          .order("id", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        listaData = fallback.data ? { ...fallback.data, meta_pixel_id: null } : null;
+        erroLista = fallback.error;
+      }
 
       debugLog("LISTA PUBLICA", listaData);
       debugLog("ERRO LISTA PUBLICA", erroLista);
