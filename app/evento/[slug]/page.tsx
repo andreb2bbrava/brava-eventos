@@ -49,6 +49,22 @@ function obterInicioEvento(evento: any) {
   return evento?.inicio_evento || (evento?.data_evento && evento?.hora_evento ? `${evento.data_evento}T${evento.hora_evento}` : null);
 }
 
+function logSupabaseError(contexto: string, error: {
+  message?: string;
+  details?: string;
+  hint?: string;
+  code?: string;
+} | null) {
+  if (process.env.NODE_ENV === "production" || !error) {
+    return;
+  }
+
+  console.error(`[SUPABASE][${contexto}] message:`, error.message || "-");
+  console.error(`[SUPABASE][${contexto}] details:`, error.details || "-");
+  console.error(`[SUPABASE][${contexto}] hint:`, error.hint || "-");
+  console.error(`[SUPABASE][${contexto}] code:`, error.code || "-");
+}
+
 export default function EventoPage() {
   const params = useParams();
   const slug =
@@ -69,11 +85,20 @@ export default function EventoPage() {
         return;
       }
 
-      const { data } = await supabase
+      const { data, error: erroEvento } = await supabase
         .from("eventos")
         .select("*")
         .eq("slug", slug)
         .single();
+
+      logSupabaseError("EVENTO PUBLICO", erroEvento);
+
+      if (!data) {
+        logSupabaseError("EVENTO PUBLICO", {
+          message: "Nenhum evento retornado para o slug informado.",
+          details: `slug=${slug}`,
+        });
+      }
 
       setEvento(data);
 
@@ -83,12 +108,21 @@ export default function EventoPage() {
         return;
       }
 
-      const { data: listasData } = await supabase
+      const { data: listasData, error: erroListas } = await supabase
         .from("listas_evento")
         .select("*")
         .eq("evento_id", data.id)
         .eq("ativa", true)
         .order("created_at", { ascending: false });
+
+      logSupabaseError("LISTAS PUBLICAS", erroListas);
+
+      if (!listasData) {
+        logSupabaseError("LISTAS PUBLICAS", {
+          message: "Nenhuma lista retornada para o evento.",
+          details: `evento_id=${data.id}`,
+        });
+      }
 
       const listasFiltradas = (listasData || []).filter((lista) => {
         return visibilidadeEhPublica(lista.tipo_visibilidade || lista.visibilidade) && !!lista.slug;

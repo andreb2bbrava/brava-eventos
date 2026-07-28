@@ -243,6 +243,7 @@ export default function ListaPublicaPage() {
 
       debugLog("EVENTO PUBLICO", eventoData);
       debugLog("ERRO EVENTO PUBLICO", erroEvento);
+      logSupabaseError("EVENTO PUBLICO", erroEvento);
 
       if (erroEvento || !eventoData) {
         setMensagemErro("Lista não encontrada.");
@@ -261,7 +262,6 @@ export default function ListaPublicaPage() {
             regra,
             tipo_lista,
             tipo_visibilidade,
-            visibilidade,
             ativa,
             meta_pixel_id
           `
@@ -272,7 +272,7 @@ export default function ListaPublicaPage() {
         .limit(1)
         .maybeSingle();
 
-      if (erroLista && /meta_pixel_id/i.test(erroLista.message || "")) {
+      if (erroLista && /(meta_pixel_id|tipo_visibilidade)/i.test(erroLista.message || "")) {
         const fallback = await supabase
           .from("listas_evento")
           .select(
@@ -284,7 +284,6 @@ export default function ListaPublicaPage() {
               regra,
               tipo_lista,
               tipo_visibilidade,
-              visibilidade,
               ativa
             `
           )
@@ -300,6 +299,7 @@ export default function ListaPublicaPage() {
 
       debugLog("LISTA PUBLICA", listaData);
       debugLog("ERRO LISTA PUBLICA", erroLista);
+        logSupabaseError("LISTA PUBLICA", erroLista);
 
       if (erroLista || !listaData) {
         setMensagemErro("Lista não encontrada.");
@@ -313,7 +313,7 @@ export default function ListaPublicaPage() {
         return;
       }
 
-      const visibilidadeAtiva = listaData.tipo_visibilidade || listaData.visibilidade;
+      const visibilidadeAtiva = listaData.tipo_visibilidade;
       if (!visibilidadeEhPublica(visibilidadeAtiva)) {
         setMensagemErro("Esta lista não está disponível publicamente.");
         setLoading(false);
