@@ -5,8 +5,7 @@ import { usePathname } from "next/navigation";
 import { ReactNode, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { resolverNomeExibicaoUsuario } from "@/lib/usuarios";
-
-type RoleUsuario = "super_admin" | "produtor" | "staff";
+import { roleLabel, type RoleUsuario } from "@/lib/roles";
 
 type BreadcrumbItem = {
   label: string;
@@ -46,27 +45,32 @@ const MENU_ITEMS: MenuItem[] = [
   {
     label: "Inicio",
     href: "/admin",
-    roles: ["super_admin", "produtor", "staff"],
+    roles: ["platform_owner", "super_admin", "produtor", "staff"],
   },
   {
     label: "Meus Eventos",
     href: "/admin#todos-eventos",
-    roles: ["super_admin", "produtor", "staff"],
+    roles: ["platform_owner", "super_admin", "produtor", "staff"],
   },
   {
     label: "Minha Equipe",
     href: "/super-admin",
-    roles: ["super_admin"],
+    roles: ["platform_owner", "super_admin"],
+  },
+  {
+    label: "Auditoria",
+    href: "/admin/auditoria",
+    roles: ["platform_owner"],
   },
   {
     label: "Relatorios",
     disabled: true,
-    roles: ["super_admin", "produtor"],
+    roles: ["platform_owner", "super_admin", "produtor"],
   },
   {
     label: "Configuracoes",
     disabled: true,
-    roles: ["super_admin", "produtor"],
+    roles: ["platform_owner", "super_admin", "produtor"],
   },
 ];
 
@@ -110,21 +114,7 @@ export default function AdminShell({
     return MENU_ITEMS.filter((item) => item.roles.includes(role));
   }, [role]);
 
-  const roleLabel = useMemo(() => {
-    if (role === "super_admin") {
-      return "Administrador Geral";
-    }
-
-    if (role === "produtor") {
-      return "Produtor";
-    }
-
-    if (role === "staff") {
-      return "Staff";
-    }
-
-    return "Operacao";
-  }, [role]);
+  const roleLabelText = useMemo(() => roleLabel(role), [role]);
 
   useEffect(() => {
     if (userName) {
@@ -221,7 +211,7 @@ export default function AdminShell({
 
               <div className="rounded-2xl bg-white/5 px-4 py-4">
                 <p className="text-sm font-bold text-white break-words">{nomeResolvido}</p>
-                <p className="mt-1 text-xs uppercase tracking-[0.18em] text-blue-200">{roleLabel}</p>
+                <p className="mt-1 text-xs uppercase tracking-[0.18em] text-blue-200">{roleLabelText}</p>
               </div>
             </div>
           </div>
@@ -296,7 +286,7 @@ export default function AdminShell({
 
                 <div className="rounded-2xl bg-white/5 px-4 py-4">
                   <p className="text-sm font-bold text-white break-words">{nomeResolvido}</p>
-                  <p className="mt-1 text-xs uppercase tracking-[0.18em] text-blue-200">{roleLabel}</p>
+                  <p className="mt-1 text-xs uppercase tracking-[0.18em] text-blue-200">{roleLabelText}</p>
                 </div>
               </div>
             ) : null}

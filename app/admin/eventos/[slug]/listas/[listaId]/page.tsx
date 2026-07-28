@@ -12,6 +12,7 @@ import {
   mensagemDuplicidadeEvento,
   normalizarNomeParticipante,
 } from "@/lib/participantes";
+import { canEditEventRole, canCheckinRole, isAdminRole, type RoleUsuario } from "@/lib/roles";
 
 type EventoResumo = {
   id: number;
@@ -107,7 +108,7 @@ export default function ParticipantesDaListaPage() {
   const [loading, setLoading] = useState(true);
   const [acessoNegado, setAcessoNegado] = useState(false);
   const [mensagemAcesso, setMensagemAcesso] = useState("");
-  const [roleUsuario, setRoleUsuario] = useState<"super_admin" | "produtor" | "staff" | null>(null);
+  const [roleUsuario, setRoleUsuario] = useState<RoleUsuario | null>(null);
 
   const [evento, setEvento] = useState<EventoResumo | null>(null);
   const [lista, setLista] = useState<ListaEvento | null>(null);
@@ -229,7 +230,7 @@ export default function ParticipantesDaListaPage() {
     const usuario = usuarioData;
     debugLog("ROLE", usuario?.role);
 
-    const role = (usuarioData?.role as "super_admin" | "produtor" | "staff" | null) ?? null;
+    const role = (usuarioData?.role as RoleUsuario | null) ?? null;
     setRoleUsuario(role);
 
     if (usuarioError || !role) {
@@ -239,7 +240,7 @@ export default function ParticipantesDaListaPage() {
       return;
     }
 
-    let autorizado = role === "super_admin";
+    let autorizado = isAdminRole(role);
 
     if (!autorizado && role === "produtor") {
       const { data: vinculacaoProdutor, error: vinculacaoProdutorError } = await supabase
@@ -288,8 +289,8 @@ export default function ParticipantesDaListaPage() {
     carregarDados();
   }, [carregarDados]);
 
-  const podeCadastrarParticipante = roleUsuario === "super_admin" || roleUsuario === "produtor";
-  const podeExcluirParticipante = roleUsuario === "super_admin" || roleUsuario === "produtor" || roleUsuario === "staff";
+  const podeCadastrarParticipante = canEditEventRole(roleUsuario);
+  const podeExcluirParticipante = canCheckinRole(roleUsuario);
 
   async function importarParticipantesSimples(e: FormEvent) {
     e.preventDefault();
@@ -319,124 +320,53 @@ export default function ParticipantesDaListaPage() {
 
     setSalvandoSimples(true);
 
-    const nomesNormalizadosInformados = nomes
-      .map((nomeLinha) => normalizarNomeParticipante(nomeLinha))
-      .filter(Boolean);
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
 
-    debugLog("EVENTO PARA VALIDACAO:", evento.id);
-    debugLog("NOMES INFORMADOS:", nomes);
-
-    const { data: participantesEventoData, error: erroParticipantesEvento } = await supabase
-      .from("participantes")
-      .select("id, nome, nome_normalizado, lista_id, listas_evento(regra)")
-      .eq("evento_id", evento.id)
-      .in("nome_normalizado", nomesNormalizadosInformados);
-
-    if (erroParticipantesEvento) {
-      const contexto = erroParticipantesEvento?.code === "PGRST204" ? "ERRO TECNICO VALIDACAO DUPLICIDADE (PGRST204)" : "ERRO VALIDACAO DUPLICIDADE";
-      console.error(contexto, {
-        message: erroParticipantesEvento?.message,
-        details: erroParticipantesEvento?.details,
-        hint: erroParticipantesEvento?.hint,
-        code: erroParticipantesEvento?.code,
-        error: erroParticipantesEvento,
-      });
+    if (!session?.access_token) {
       setSalvandoSimples(false);
       setErroCadastro(true);
-      setMensagemCadastro("Não foi possível verificar os participantes deste evento. Tente novamente.");
+      setMensagemCadastro("Sua sessao expirou. Faca login novamente.");
       return;
     }
 
-    const participantesExistentes = (participantesEventoData || []) as ParticipanteDuplicidadeRow[];
-    const { nomesExistentes, participantePorNome } = criarIndiceParticipantesEvento(participantesExistentes);
-
-    debugLog("PARTICIPANTES EXISTENTES:", participantesExistentes);
-    debugLog("NOMES NORMALIZADOS EXISTENTES:", Array.from(nomesExistentes));
-
-    const nomesNovos: string[] = [];
-    const payload: Array<{ evento_id: number; lista_id: number; nome: string; nome_normalizado: string; presente: boolean }> = [];
-    let duplicadosIgnorados = 0;
-    const duplicados: Array<{ nome: string; participante: ParticipanteDuplicidadeRow | null }> = [];
-
-    nomes.forEach((nomeLinha) => {
-      const nomeNormalizado = normalizarNomeParticipante(nomeLinha);
-
-      if (!nomeNormalizado) {
-        duplicadosIgnorados += 1;
-        return;
-      }
-
-      if (nomesExistentes.has(nomeNormalizado)) {
-        duplicados.push({
-          nome: nomeLinha,
-          participante: participantePorNome.get(nomeNormalizado) || null,
-        });
-        duplicadosIgnorados += 1;
-        return;
-      }
-
-      nomesExistentes.add(nomeNormalizado);
-      nomesNovos.push(nomeLinha);
-      payload.push({
-        evento_id: evento.id,
-        lista_id: lista.id,
-        nome: nomeLinha,
-        nome_normalizado: nomeNormalizado,
-        presente: false,
-      });
+    const response = await fetch("/api/participantes", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        modo: "bulk",
+        eventoId: evento.id,
+        listaId: lista.id,
+        nomes,
+      }),
     });
 
-    debugLog("NOMES NOVOS:", nomesNovos);
-    debugLog(
-      "DUPLICADOS REAIS:",
-      duplicados.map((item) => ({
-        nome: item.nome,
-        participanteId: item.participante?.id || null,
-        regra: item.participante ? obterRegraDuplicada(item.participante) : null,
-      }))
-    );
+    const result = await response.json();
+    setSalvandoSimples(false);
 
-    if (payload.length === 0) {
-      setSalvandoSimples(false);
-      setErroCadastro(false);
-      setMensagemCadastro("Todos os nomes informados já estão cadastrados neste evento.");
+    if (!response.ok || result.error) {
+      setErroCadastro(true);
+      setMensagemCadastro(result.error || "Nao foi possivel concluir a importacao.");
       return;
     }
 
-    console.log("PAYLOAD PARTICIPANTES", payload);
-
-    const { error } = await supabase.from("participantes").insert(payload);
-
-    setSalvandoSimples(false);
-
-    if (error) {
-  console.error("ERRO REAL AO IMPORTAR PARTICIPANTES:", error);
-  console.error("MESSAGE:", error.message);
-  console.error("DETAILS:", error.details);
-  console.error("HINT:", error.hint);
-  console.error("CODE:", error.code);
-  console.error("PAYLOAD ENVIADO:", payload);
-
-  setErroCadastro(true);
-  if (erroEhDuplicidadeParticipante(error)) {
-    setMensagemCadastro("Este nome ja esta cadastrado neste evento.");
-    return;
-  }
-
-  setMensagemCadastro("Não foi possível concluir o cadastro. Tente novamente.");
-
-  return;
-}
+    const inseridos = Number(result.inseridos || 0);
+    const ignorados = Number(result.ignorados || 0);
 
     setNomesEmMassa("");
     await carregarParticipantes(evento.id, lista.id);
     setErroCadastro(false);
-    if (duplicadosIgnorados === 0) {
-      setMensagemCadastro(`${payload.length} nomes foram adicionados com sucesso.`);
+
+    if (ignorados <= 0) {
+      setMensagemCadastro(`${inseridos} nomes foram adicionados com sucesso.`);
       return;
     }
 
-    setMensagemCadastro(`${payload.length} nomes foram adicionados. ${duplicadosIgnorados} nomes já estavam cadastrados neste evento e foram ignorados.`);
+    setMensagemCadastro(`${inseridos} nomes foram adicionados. ${ignorados} nomes ja estavam cadastrados neste evento e foram ignorados.`);
   }
 
   async function adicionarParticipanteCompleto(e: FormEvent) {
@@ -463,92 +393,44 @@ export default function ParticipantesDaListaPage() {
       return;
     }
 
-    const nomeNormalizado = normalizarNomeParticipante(nome);
-
-    debugLog("EVENTO PARA VALIDACAO:", evento.id);
-    debugLog("NOMES INFORMADOS:", [nome.trim()]);
-
-    const { data: participanteDuplicadoData, error: erroDuplicidade } = await supabase
-      .from("participantes")
-      .select("id, nome, nome_normalizado, lista_id, listas_evento(regra)")
-      .eq("evento_id", evento.id)
-      .eq("nome_normalizado", nomeNormalizado)
-      .limit(1);
-
-    if (erroDuplicidade) {
-      const contexto = erroDuplicidade?.code === "PGRST204" ? "ERRO TECNICO VALIDACAO DUPLICIDADE (PGRST204)" : "ERRO VALIDACAO DUPLICIDADE";
-      console.error(contexto, {
-        message: erroDuplicidade?.message,
-        details: erroDuplicidade?.details,
-        hint: erroDuplicidade?.hint,
-        code: erroDuplicidade?.code,
-        error: erroDuplicidade,
-      });
-      setErroCadastro(true);
-      setMensagemCadastro("Não foi possível verificar os participantes deste evento. Tente novamente.");
-      return;
-    }
-
-    const participantesExistentes = (participanteDuplicadoData || []) as ParticipanteDuplicidadeRow[];
-    const participanteDuplicado = participantesExistentes[0] || null;
-
-    const { nomesExistentes } = criarIndiceParticipantesEvento(participantesExistentes);
-    debugLog("PARTICIPANTES EXISTENTES:", participantesExistentes);
-    debugLog("NOMES NORMALIZADOS EXISTENTES:", Array.from(nomesExistentes));
-    debugLog("NOMES NOVOS:", participanteDuplicado ? [] : [nome.trim()]);
-    debugLog(
-      "DUPLICADOS REAIS:",
-      participanteDuplicado
-        ? [
-            {
-              nome: nome.trim(),
-              participanteId: participanteDuplicado.id,
-              regra: obterRegraDuplicada(participanteDuplicado),
-            },
-          ]
-        : []
-    );
-
-    if (participanteDuplicado) {
-      setErroCadastro(true);
-      setMensagemCadastro(mensagemDuplicidadeEvento(nome.trim(), obterRegraDuplicada(participanteDuplicado)));
-      return;
-    }
-
     setSalvandoVip(true);
 
-const payload = {
-  evento_id: evento.id,
-  lista_id: lista.id,
-  nome: nome.trim(),
-  nome_normalizado: nomeNormalizado,
-  whatsapp: telefone.trim() || null,
-  email: email.trim() || null,
-  presente: false,
-};
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
 
-    console.log("PAYLOAD PARTICIPANTES", [payload]);
+    if (!session?.access_token) {
+      setSalvandoVip(false);
+      setErroCadastro(true);
+      setMensagemCadastro("Sua sessao expirou. Faca login novamente.");
+      return;
+    }
 
-    const { error } = await supabase.from("participantes").insert([payload]);
+    const response = await fetch("/api/participantes", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        modo: "single",
+        eventoId: evento.id,
+        listaId: lista.id,
+        participante: {
+          nome: nome.trim(),
+          whatsapp: telefone.trim() || null,
+          email: email.trim() || null,
+        },
+      }),
+    });
+
+    const result = await response.json();
 
     setSalvandoVip(false);
 
-    if (error) {
-      console.error("Erro ao importar participantes:", error);
-      console.error("Erro participante message:", error?.message);
-      console.error("Erro participante details:", error?.details);
-      console.error("Erro participante hint:", error?.hint);
-      console.error("Erro participante code:", error?.code);
-      console.error("Erro participante JSON:", JSON.stringify(error, null, 2));
-      console.error("Payload participante:", payload);
-      if (erroEhDuplicidadeParticipante(error)) {
-        setErroCadastro(true);
-        setMensagemCadastro("Este nome ja esta cadastrado neste evento.");
-        return;
-      }
-
+    if (!response.ok || result.error) {
       setErroCadastro(true);
-      setMensagemCadastro("Erro ao adicionar participante da Lista Completa.");
+      setMensagemCadastro(result.error || "Erro ao adicionar participante da Lista Completa.");
       return;
     }
 

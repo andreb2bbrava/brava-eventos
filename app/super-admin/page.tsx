@@ -6,8 +6,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import AdminShell from "@/app/components/AdminShell";
 import { resolverNomeExibicaoUsuario } from "@/lib/usuarios";
-
-type RoleUsuario = "super_admin" | "produtor" | "staff";
+import { isAdminRole, isPlatformOwner, roleLabel, type RoleUsuario } from "@/lib/roles";
 
 type UsuarioSistema = {
   id: string;
@@ -18,19 +17,7 @@ type UsuarioSistema = {
 };
 
 function roleAmigavel(role: string) {
-  if (role === "super_admin") {
-    return "Administrador Geral";
-  }
-
-  if (role === "produtor") {
-    return "Produtor";
-  }
-
-  if (role === "staff") {
-    return "Staff";
-  }
-
-  return role;
+  return roleLabel(role);
 }
 
 function nomeCompletoUsuario(usuario: UsuarioSistema) {
@@ -60,6 +47,7 @@ export default function SuperAdminPage() {
   const [roleEdicao, setRoleEdicao] = useState<RoleUsuario>("produtor");
   const [processandoId, setProcessandoId] = useState<string | null>(null);
   const [nomeUsuarioLogado, setNomeUsuarioLogado] = useState("Usuario Brava");
+  const [roleUsuarioLogado, setRoleUsuarioLogado] = useState<RoleUsuario | null>(null);
 
   async function carregarDados() {
     const {
@@ -85,10 +73,12 @@ export default function SuperAdminPage() {
       })
     );
 
-    if (usuario?.role !== "super_admin") {
+    if (!isAdminRole(usuario?.role)) {
       router.push("/admin");
       return;
     }
+
+    setRoleUsuarioLogado(usuario.role as RoleUsuario);
 
     const { data: eventosData } = await supabase
       .from("eventos")
@@ -171,6 +161,8 @@ export default function SuperAdminPage() {
     setSenhaEdicao("");
     setRoleEdicao(usuario.role);
   }
+
+  const podeGerenciarPlatformOwner = isPlatformOwner(roleUsuarioLogado);
 
   function cancelarEdicao() {
     setUsuarioEditandoId(null);
@@ -310,7 +302,7 @@ export default function SuperAdminPage() {
 
   return (
     <AdminShell
-      role="super_admin"
+      role={roleUsuarioLogado}
       userName={nomeUsuarioLogado}
       title="Minha Equipe"
       subtitle="Gerencie as pessoas que tem acesso a plataforma. Administradores possuem acesso total, produtores gerenciam eventos e staff opera o check-in."
@@ -448,6 +440,7 @@ export default function SuperAdminPage() {
               <option value="produtor">Produtor</option>
               <option value="staff">Staff</option>
               <option value="super_admin">Administrador Geral</option>
+              {podeGerenciarPlatformOwner ? <option value="platform_owner">Proprietario da Plataforma</option> : null}
             </select>
           </div>
 
@@ -477,6 +470,7 @@ export default function SuperAdminPage() {
                       <option value="produtor">Produtor</option>
                       <option value="staff">Staff</option>
                       <option value="super_admin">Administrador Geral</option>
+                      {podeGerenciarPlatformOwner ? <option value="platform_owner">Proprietario da Plataforma</option> : null}
                     </select>
                     <input
                       type="password"
@@ -583,6 +577,7 @@ export default function SuperAdminPage() {
                             <option value="produtor">Produtor</option>
                             <option value="staff">Staff</option>
                             <option value="super_admin">Administrador Geral</option>
+                            {podeGerenciarPlatformOwner ? <option value="platform_owner">Proprietario da Plataforma</option> : null}
                           </select>
                           <input
                             type="password"

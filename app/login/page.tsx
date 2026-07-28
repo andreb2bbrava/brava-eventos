@@ -34,6 +34,11 @@ export default function LoginPage() {
     console.log("USUARIO:", usuario);
     console.log("ERRO USUARIO:", erroUsuario);
 
+    if (usuario?.role === "platform_owner") {
+      router.push("/super-admin");
+      return;
+    }
+
     if (usuario?.role === "super_admin") {
       router.push("/super-admin");
       return;

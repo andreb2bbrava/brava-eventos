@@ -5,8 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import AdminShell from "@/app/components/AdminShell";
 import { gerarSlugUnicoEvento } from "@/lib/slug";
-
-type RoleUsuario = "super_admin" | "produtor" | "staff";
+import { canEditEventRole, type RoleUsuario } from "@/lib/roles";
 
 function separarDataHora(dataHora: string) {
   if (!dataHora) {
@@ -66,7 +65,7 @@ export default function CriarEventoPage() {
 
       setRoleUsuario((usuarioData?.role as RoleUsuario | null) ?? null);
 
-      if (!usuarioData || (usuarioData.role !== "super_admin" && usuarioData.role !== "produtor")) {
+      if (!usuarioData || !canEditEventRole(usuarioData.role)) {
         setAcessoNegado(true);
         return;
       }

@@ -5,10 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import AdminShell from "@/app/components/AdminShell";
+import DeleteEventButton from "@/app/components/DeleteEventButton";
 import { gerarSlugUnicoEvento } from "@/lib/slug";
 import { primeiroNome, resolverNomeExibicaoUsuario } from "@/lib/usuarios";
-
-type RoleUsuario = "super_admin" | "produtor" | "staff";
+import { canEditEventRole, isAdminRole, roleLabel, type RoleUsuario } from "@/lib/roles";
 
 type Evento = {
   id: number;
@@ -20,6 +20,7 @@ type Evento = {
   banner_url: string | null;
   banner_posicao: string | null;
   tipo_lista: string | null;
+  criador_id: string | null;
 };
 
 type ResumoOperacao = {
@@ -31,19 +32,7 @@ type ResumoOperacao = {
 };
 
 function roleAmigavel(role: string | null) {
-  if (role === "super_admin") {
-    return "Administrador Geral";
-  }
-
-  if (role === "produtor") {
-    return "Produtor";
-  }
-
-  if (role === "staff") {
-    return "Staff";
-  }
-
-  return "Usuario";
+  return role ? roleLabel(role) : "Usuario";
 }
 
 function obterSaudacaoAgora() {
@@ -185,11 +174,12 @@ export default function AdminPage() {
   const [eventosAtivos, setEventosAtivos] = useState<Evento[]>([]);
   const [eventosHistorico, setEventosHistorico] = useState<Evento[]>([]);
   const [roleUsuario, setRoleUsuario] = useState<RoleUsuario | null>(null);
+  const [usuarioId, setUsuarioId] = useState<string | null>(null);
   const [nomePrimeiro, setNomePrimeiro] = useState("Usuario");
   const [nomeCompleto, setNomeCompleto] = useState("Usuario Brava");
-  const [excluindoEventoId, setExcluindoEventoId] = useState<number | null>(null);
   const [corrigindoSlugIds, setCorrigindoSlugIds] = useState<number[]>([]);
   const [buscaEventos, setBuscaEventos] = useState("");
+  const [toastMensagem, setToastMensagem] = useState("");
   const [loading, setLoading] = useState(true);
   const [resumo, setResumo] = useState<ResumoOperacao>({
     eventosFuturos: 0,
@@ -256,7 +246,7 @@ export default function AdminPage() {
     return totalFuturos > 3;
   }, [eventosAtivos]);
 
-  const podeCriarEvento = roleUsuario === "super_admin" || roleUsuario === "produtor";
+  const podeCriarEvento = canEditEventRole(roleUsuario);
   const slugEventoPrincipal = normalizarSlug(eventoPrincipal?.evento?.slug);
   const podeEntrarCentralEventoPrincipal = slugValido(slugEventoPrincipal);
 
@@ -359,6 +349,8 @@ export default function AdminPage() {
       return;
     }
 
+    setUsuarioId(user.id);
+
     const { data: usuarioData } = await supabase
       .from("usuarios")
       .select("role, nome, email")
@@ -393,10 +385,10 @@ export default function AdminPage() {
 
     let eventosAcessiveis: Evento[] = [];
 
-    if (role === "super_admin") {
+    if (isAdminRole(role)) {
       const { data } = await supabase
         .from("eventos")
-        .select("id, nome, slug, data_evento, hora_evento, local_evento, banner_url, banner_posicao, tipo_lista")
+        .select("id, nome, slug, data_evento, hora_evento, local_evento, banner_url, banner_posicao, tipo_lista, criador_id")
         .order("data_evento", { ascending: true })
         .order("hora_evento", { ascending: true });
 
@@ -412,7 +404,7 @@ export default function AdminPage() {
       if (idsEventos.length > 0) {
         const { data } = await supabase
           .from("eventos")
-          .select("id, nome, slug, data_evento, hora_evento, local_evento, banner_url, banner_posicao, tipo_lista")
+          .select("id, nome, slug, data_evento, hora_evento, local_evento, banner_url, banner_posicao, tipo_lista, criador_id")
           .in("id", idsEventos)
           .order("data_evento", { ascending: true })
           .order("hora_evento", { ascending: true });
@@ -430,7 +422,7 @@ export default function AdminPage() {
       if (idsEventos.length > 0) {
         const { data } = await supabase
           .from("eventos")
-          .select("id, nome, slug, data_evento, hora_evento, local_evento, banner_url, banner_posicao, tipo_lista")
+          .select("id, nome, slug, data_evento, hora_evento, local_evento, banner_url, banner_posicao, tipo_lista, criador_id")
           .in("id", idsEventos)
           .order("data_evento", { ascending: true })
           .order("hora_evento", { ascending: true });
@@ -499,7 +491,7 @@ export default function AdminPage() {
     const idsOperacao = eventosAtivosFiltrados.map((evento) => evento.id);
 
     let usuariosCount: number | null = null;
-    if (role === "super_admin") {
+    if (isAdminRole(role)) {
       const { count, error } = await supabase.from("usuarios").select("id", { count: "exact", head: true });
       if (!error) {
         usuariosCount = count ?? 0;
@@ -544,50 +536,7 @@ export default function AdminPage() {
     router.push("/login");
   }
 
-  async function excluirEvento(eventoId: number) {
-    if (roleUsuario === "staff") {
-      alert("Staff nao possui permissao para excluir eventos.");
-      return;
-    }
-
-    const confirmar = confirm("Tem certeza que deseja excluir este evento? Esta acao nao podera ser desfeita.");
-
-    if (!confirmar) {
-      return;
-    }
-
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session?.access_token) {
-      alert("Sua sessao expirou. Faca login novamente.");
-      router.push("/login");
-      return;
-    }
-
-    setExcluindoEventoId(eventoId);
-
-    const response = await fetch("/api/excluir-evento", {
-      method: "DELETE",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({
-        eventoId,
-      }),
-    });
-
-    const result = await response.json();
-
-    setExcluindoEventoId(null);
-
-    if (!response.ok || result.error) {
-      alert(result.error || "Erro ao excluir evento.");
-      return;
-    }
-
+  function removerEventoDaTela(eventoId: number) {
     const eraEventoAtivo = eventosAtivos.some((evento) => evento.id === eventoId);
     setEventosAtivos((prev) => prev.filter((evento) => evento.id !== eventoId));
     setEventosHistorico((prev) => prev.filter((evento) => evento.id !== eventoId));
@@ -595,7 +544,6 @@ export default function AdminPage() {
       ...prev,
       eventosFuturos: eraEventoAtivo ? Math.max(prev.eventosFuturos - 1, 0) : prev.eventosFuturos,
     }));
-    alert("Evento excluido com sucesso!");
   }
 
   async function corrigirSlugEvento(evento: Evento) {
@@ -649,6 +597,29 @@ export default function AdminPage() {
     carregarEventos();
   }, []);
 
+  useEffect(() => {
+    try {
+      const mensagem = window.sessionStorage.getItem("evento_excluido_feedback");
+
+      if (!mensagem) {
+        return;
+      }
+
+      setToastMensagem(mensagem);
+      window.sessionStorage.removeItem("evento_excluido_feedback");
+
+      const timer = window.setTimeout(() => {
+        setToastMensagem("");
+      }, 2600);
+
+      return () => {
+        window.clearTimeout(timer);
+      };
+    } catch (error) {
+      console.warn("Falha ao ler feedback de exclusao:", error);
+    }
+  }, []);
+
   if (loading) {
     return (
       <main className="min-h-screen bg-slate-50 text-slate-900 p-4 sm:p-6 overflow-x-hidden">
@@ -672,7 +643,7 @@ export default function AdminPage() {
             <Link
               href="/admin/criar-evento"
               className={`px-6 py-3 rounded-2xl font-bold transition min-h-11 inline-flex items-center shadow-sm ${
-                roleUsuario === "super_admin"
+                roleUsuario === "platform_owner" || roleUsuario === "super_admin"
                   ? "bg-blue-700 hover:bg-blue-600 text-white shadow-lg"
                   : "bg-blue-600 hover:bg-blue-500 text-white"
               }`}
@@ -690,6 +661,12 @@ export default function AdminPage() {
       }
     >
       <div className="space-y-8">
+        {toastMensagem ? (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-semibold text-emerald-700">
+            {toastMensagem}
+          </div>
+        ) : null}
+
         {roleUsuario === "staff" ? (
           <section className="rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
             Seu perfil possui foco operacional e mostra apenas os eventos vinculados ao seu check-in.
@@ -1047,15 +1024,21 @@ export default function AdminPage() {
                         </div>
                       )}
 
-                      {podeCriarEvento && (
-                        <button
-                          onClick={() => excluirEvento(evento.id)}
-                          disabled={excluindoEventoId === evento.id}
-                          className="bg-red-500 hover:bg-red-400 disabled:bg-red-300 text-center text-white py-3 rounded-2xl font-bold transition min-h-11"
-                        >
-                          {excluindoEventoId === evento.id ? "Excluindo..." : "Excluir"}
-                        </button>
-                      )}
+                      {podeCriarEvento ? (
+                        <DeleteEventButton
+                          eventoId={evento.id}
+                          eventoNome={evento.nome}
+                          canDelete={
+                            isAdminRole(roleUsuario) ||
+                            (roleUsuario === "produtor" && Boolean(usuarioId) && String(evento.criador_id) === String(usuarioId))
+                          }
+                          onDeleted={async () => {
+                            removerEventoDaTela(evento.id);
+                            setToastMensagem("Evento excluído com sucesso.");
+                          }}
+                          className="inline-flex w-full min-h-11 items-center justify-center gap-2 rounded-2xl bg-red-500 py-3 text-center font-bold text-white transition hover:bg-red-400 disabled:bg-red-300"
+                        />
+                      ) : null}
                     </div>
                   </div>
                 </article>

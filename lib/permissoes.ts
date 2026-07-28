@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { canCheckinRole, canEditEventRole, isAdminRole, isRoleUsuario, type RoleUsuario } from "@/lib/roles";
 
 export async function podeAcessarEvento(slug: string) {
   const {
@@ -20,7 +21,7 @@ export async function podeAcessarEvento(slug: string) {
     return { autorizado: false, evento: null, erro: "Usuário não encontrado.", role: null };
   }
 
-  const role = usuarioData.role as string | null;
+  const role = isRoleUsuario(usuarioData.role) ? usuarioData.role : null;
 
   const { data: evento, error: eventoError } = await supabase
     .from("eventos")
@@ -32,7 +33,7 @@ export async function podeAcessarEvento(slug: string) {
     return { autorizado: false, evento: null, erro: "Evento não encontrado.", role };
   }
 
-  if (role === "super_admin") {
+  if (isAdminRole(role)) {
     return { autorizado: true, evento, erro: null, role };
   }
 
@@ -76,7 +77,7 @@ export async function podeEditarEvento(slug: string) {
     return resultado;
   }
 
-  const podeEditar = resultado.role === "super_admin" || resultado.role === "produtor";
+  const podeEditar = canEditEventRole(resultado.role as RoleUsuario | null);
 
   return {
     ...resultado,
@@ -92,7 +93,7 @@ export async function podeFazerCheckin(slug: string) {
     return resultado;
   }
 
-  const podeCheckin = resultado.role === "super_admin" || resultado.role === "produtor" || resultado.role === "staff";
+  const podeCheckin = canCheckinRole(resultado.role as RoleUsuario | null);
 
   return { ...resultado, autorizado: podeCheckin };
 }

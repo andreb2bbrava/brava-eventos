@@ -1,17 +1,13 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-type RoleUsuario = "super_admin" | "produtor" | "staff";
+import { registrarAuditLog } from "@/lib/auditoria";
+import { canEditEventRole, isAdminRole, isRoleUsuario, type RoleUsuario } from "@/lib/roles";
+import { normalizarNomeParticipante } from "@/lib/participantes";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 type UsuarioAutenticado = {
   id: string;
   role: RoleUsuario;
 };
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
 
 function obterToken(request: Request) {
   const authHeader = request.headers.get("authorization") || "";
@@ -40,7 +36,7 @@ async function autenticarUsuario(request: Request): Promise<{ ok: true; usuario:
 
   const role = usuarioData?.role as RoleUsuario | undefined;
 
-  if (usuarioError || !usuarioData?.id || !role || (role !== "super_admin" && role !== "produtor" && role !== "staff")) {
+  if (usuarioError || !usuarioData?.id || !role || !isRoleUsuario(role)) {
     return { ok: false, response: NextResponse.json({ error: "Usuario sem permissao." }, { status: 403 }) };
   }
 
@@ -54,7 +50,7 @@ async function autenticarUsuario(request: Request): Promise<{ ok: true; usuario:
 }
 
 async function validarAcessoEvento(usuario: UsuarioAutenticado, eventoId: number) {
-  if (usuario.role === "super_admin") {
+  if (isAdminRole(usuario.role)) {
     return true;
   }
 
@@ -82,12 +78,193 @@ async function validarAcessoEvento(usuario: UsuarioAutenticado, eventoId: number
 async function buscarParticipanteNoEvento(participanteId: number, eventoId: number) {
   const { data } = await supabaseAdmin
     .from("participantes")
-    .select("id, nome, evento_id")
+    .select("id, nome, evento_id, lista_id")
     .eq("id", participanteId)
     .eq("evento_id", eventoId)
     .maybeSingle();
 
   return data;
+}
+
+async function buscarEventoResumo(eventoId: number) {
+  const { data } = await supabaseAdmin.from("eventos").select("id, nome").eq("id", eventoId).maybeSingle();
+  return data;
+}
+
+export async function POST(request: Request) {
+  try {
+    const authResult = await autenticarUsuario(request);
+    if (!authResult.ok) {
+      return authResult.response;
+    }
+
+    if (!canEditEventRole(authResult.usuario.role)) {
+      return NextResponse.json({ error: "Usuario sem permissao para cadastrar participantes." }, { status: 403 });
+    }
+
+    const body = (await request.json()) as {
+      modo?: "single" | "bulk";
+      eventoId?: number;
+      listaId?: number;
+      participante?: {
+        nome?: string;
+        whatsapp?: string | null;
+        email?: string | null;
+      };
+      nomes?: string[];
+    };
+
+    const modo = body?.modo;
+    const eventoId = Number(body?.eventoId);
+    const listaId = Number(body?.listaId);
+
+    if (!Number.isFinite(eventoId) || !Number.isFinite(listaId) || (modo !== "single" && modo !== "bulk")) {
+      return NextResponse.json({ error: "Dados invalidos para cadastro de participante." }, { status: 400 });
+    }
+
+    const autorizado = await validarAcessoEvento(authResult.usuario, eventoId);
+    if (!autorizado) {
+      return NextResponse.json({ error: "Voce nao possui acesso a este evento." }, { status: 403 });
+    }
+
+    const evento = await buscarEventoResumo(eventoId);
+
+    if (modo === "single") {
+      const nome = String(body?.participante?.nome || "").trim();
+      const whatsapp = String(body?.participante?.whatsapp || "").trim();
+      const email = String(body?.participante?.email || "").trim();
+
+      if (!nome) {
+        return NextResponse.json({ error: "Nome obrigatorio." }, { status: 400 });
+      }
+
+      const nomeNormalizado = normalizarNomeParticipante(nome);
+
+      const { data: duplicado } = await supabaseAdmin
+        .from("participantes")
+        .select("id")
+        .eq("evento_id", eventoId)
+        .eq("nome_normalizado", nomeNormalizado)
+        .maybeSingle();
+
+      if (duplicado) {
+        return NextResponse.json({ error: "Este nome ja esta cadastrado neste evento." }, { status: 409 });
+      }
+
+      const { data: novoParticipante, error } = await supabaseAdmin
+        .from("participantes")
+        .insert([
+          {
+            evento_id: eventoId,
+            lista_id: listaId,
+            nome,
+            nome_normalizado: nomeNormalizado,
+            whatsapp: whatsapp || null,
+            email: email || null,
+            presente: false,
+          },
+        ])
+        .select("id, nome, whatsapp, email, presente, entrada_confirmada_em")
+        .single();
+
+      if (error || !novoParticipante) {
+        return NextResponse.json({ error: "Nao foi possivel adicionar participante." }, { status: 400 });
+      }
+
+      await registrarAuditLog(
+        {
+          acao: "participante_adicionado",
+          entidade: "participante",
+          entidadeId: String(novoParticipante.id),
+          eventoId,
+          listaId,
+          participanteId: novoParticipante.id,
+          descricao: `Adicionou o participante ${nome}${evento?.nome ? ` no evento ${evento.nome}.` : "."}`,
+          dadosNovos: {
+            nome,
+            whatsapp: whatsapp || null,
+            email: email || null,
+          },
+        },
+        { request }
+      );
+
+      return NextResponse.json({ success: true, participante: novoParticipante });
+    }
+
+    const nomesRaw = Array.isArray(body?.nomes) ? body.nomes : [];
+    const nomes = nomesRaw.map((item) => String(item || "").trim()).filter(Boolean);
+
+    if (nomes.length === 0) {
+      return NextResponse.json({ error: "Informe ao menos um nome para importacao." }, { status: 400 });
+    }
+
+    const nomesNormalizadosInformados = nomes.map((nome) => normalizarNomeParticipante(nome)).filter(Boolean);
+
+    const { data: participantesExistentes } = await supabaseAdmin
+      .from("participantes")
+      .select("id, nome_normalizado")
+      .eq("evento_id", eventoId)
+      .in("nome_normalizado", nomesNormalizadosInformados);
+
+    const nomesJaCadastrados = new Set((participantesExistentes || []).map((item) => item.nome_normalizado).filter(Boolean));
+    const nomesInseridos = new Set<string>();
+
+    const payload: Array<{ evento_id: number; lista_id: number; nome: string; nome_normalizado: string; presente: boolean }> = [];
+
+    for (const nome of nomes) {
+      const nomeNormalizado = normalizarNomeParticipante(nome);
+      if (!nomeNormalizado) {
+        continue;
+      }
+
+      if (nomesJaCadastrados.has(nomeNormalizado) || nomesInseridos.has(nomeNormalizado)) {
+        continue;
+      }
+
+      nomesInseridos.add(nomeNormalizado);
+      payload.push({
+        evento_id: eventoId,
+        lista_id: listaId,
+        nome,
+        nome_normalizado: nomeNormalizado,
+        presente: false,
+      });
+    }
+
+    if (payload.length === 0) {
+      return NextResponse.json({ success: true, inseridos: 0, ignorados: nomes.length });
+    }
+
+    const { error: insertError } = await supabaseAdmin.from("participantes").insert(payload);
+
+    if (insertError) {
+      return NextResponse.json({ error: "Nao foi possivel importar participantes." }, { status: 400 });
+    }
+
+    await registrarAuditLog(
+      {
+        acao: "importacao_massa_participantes",
+        entidade: "participante",
+        eventoId,
+        listaId,
+        descricao: `Adicionou ${payload.length} participantes em massa${evento?.nome ? ` no evento ${evento.nome}.` : "."}`,
+        dadosNovos: {
+          quantidade_inserida: payload.length,
+          quantidade_ignorada: nomes.length - payload.length,
+        },
+      },
+      { request }
+    );
+
+    return NextResponse.json({
+      success: true,
+      inseridos: payload.length,
+      ignorados: nomes.length - payload.length,
+    });
+  } catch {
+    return NextResponse.json({ error: "Erro interno ao cadastrar participantes." }, { status: 500 });
+  }
 }
 
 export async function PATCH(request: Request) {
@@ -144,6 +321,30 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Nao foi possivel atualizar o check-in." }, { status: 400 });
     }
 
+    const evento = await buscarEventoResumo(eventoId);
+
+    await registrarAuditLog(
+      {
+        acao: action === "checkin" ? "checkin_realizado" : "checkin_desfeito",
+        entidade: "participante",
+        entidadeId: String(participanteId),
+        eventoId,
+        listaId: participante.lista_id || null,
+        participanteId,
+        descricao:
+          action === "checkin"
+            ? `Realizou check-in de ${participante.nome}${evento?.nome ? ` no evento ${evento.nome}.` : "."}`
+            : `Desfez o check-in de ${participante.nome}${evento?.nome ? ` no evento ${evento.nome}.` : "."}`,
+        dadosAnteriores: {
+          presente: action !== "checkin",
+        },
+        dadosNovos: {
+          presente: action === "checkin",
+        },
+      },
+      { request }
+    );
+
     return NextResponse.json({
       success: true,
       participante: participanteAtualizado,
@@ -191,6 +392,24 @@ export async function DELETE(request: Request) {
     if (deleteError) {
       return NextResponse.json({ error: "Nao foi possivel excluir participante." }, { status: 400 });
     }
+
+    const evento = await buscarEventoResumo(eventoId);
+
+    await registrarAuditLog(
+      {
+        acao: "participante_excluido",
+        entidade: "participante",
+        entidadeId: String(participanteId),
+        eventoId,
+        listaId: participante.lista_id || null,
+        participanteId,
+        descricao: `Excluiu o participante ${participante.nome}${evento?.nome ? ` do evento ${evento.nome}.` : "."}`,
+        dadosAnteriores: {
+          nome: participante.nome,
+        },
+      },
+      { request }
+    );
 
     return NextResponse.json({
       success: true,

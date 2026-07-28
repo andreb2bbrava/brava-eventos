@@ -38,6 +38,7 @@ export async function GET(request: Request) {
   }
 
   if (
+    usuario.role === "platform_owner" ||
     usuario.role === "super_admin" ||
     usuario.role === "produtor" ||
     usuario.role === "staff"

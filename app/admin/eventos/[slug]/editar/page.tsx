@@ -6,7 +6,9 @@ import { supabase } from "@/lib/supabase";
 import { podeEditarEvento } from "@/lib/permissoes";
 import AdminShell from "@/app/components/AdminShell";
 import AdminEventTabs from "@/app/components/AdminEventTabs";
+import DeleteEventButton from "@/app/components/DeleteEventButton";
 import { gerarSlugUnicoEvento } from "@/lib/slug";
+import { canEditEventRole, isAdminRole, type RoleUsuario } from "@/lib/roles";
 
 type Produtor = {
   id: string | number;
@@ -62,7 +64,9 @@ export default function EditarEventoPage() {
   const [loading, setLoading] =
     useState(true);
 
-  const [roleUsuario, setRoleUsuario] = useState<"super_admin" | "produtor" | "staff" | null>(null);
+  const [roleUsuario, setRoleUsuario] = useState<RoleUsuario | null>(null);
+  const [usuarioId, setUsuarioId] = useState<string | null>(null);
+  const [criadorId, setCriadorId] = useState<string | null>(null);
 
   const [salvando, setSalvando] =
     useState(false);
@@ -124,21 +128,28 @@ export default function EditarEventoPage() {
   const carregarEvento = useCallback(async () => {
     setLoading(true);
 
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    setUsuarioId(user?.id || null);
+
     const { autorizado, evento, erro, role } =
       await podeEditarEvento(slug);
 
     if (!autorizado || !evento) {
       setAcessoNegado(true);
       setMensagemAcesso(erro || "Você não possui permissão para editar este evento.");
-      setRoleUsuario((role as "super_admin" | "produtor" | "staff" | null) ?? null);
+      setRoleUsuario((role as RoleUsuario | null) ?? null);
       setLoading(false);
       return;
     }
 
     setAcessoNegado(false);
     setMensagemAcesso("");
-    setRoleUsuario((role as "super_admin" | "produtor" | "staff" | null) ?? null);
+    setRoleUsuario((role as RoleUsuario | null) ?? null);
     setEventoId(evento.id);
+    setCriadorId(evento.criador_id ? String(evento.criador_id) : null);
 
     setSlugEvento(evento.slug || "");
 
@@ -506,6 +517,12 @@ export default function EditarEventoPage() {
 
   }
 
+  const podeExcluirEvento =
+    isAdminRole(roleUsuario) ||
+    (roleUsuario === "produtor" && Boolean(usuarioId) && Boolean(criadorId) && String(usuarioId) === String(criadorId));
+
+  const nomeEventoExibicao = nome.trim() || slugEvento || "Evento";
+
   return (
 
     <AdminShell
@@ -748,6 +765,34 @@ export default function EditarEventoPage() {
         </form>
 
         </div>
+
+        {(canEditEventRole(roleUsuario)) && eventoId ? (
+          <section className="max-w-4xl rounded-3xl border border-red-200 bg-red-50/60 p-5 sm:p-6 shadow-sm">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-extrabold text-red-700">Zona de perigo</h2>
+                <p className="mt-1 text-sm text-red-700/90">
+                  Exclui o evento e todos os dados vinculados de forma definitiva.
+                </p>
+              </div>
+
+              <DeleteEventButton
+                eventoId={eventoId}
+                eventoNome={nomeEventoExibicao}
+                canDelete={podeExcluirEvento}
+                redirectToAdmin
+                buttonLabel="🗑 Excluir Evento"
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-red-300"
+              />
+            </div>
+
+            {!podeExcluirEvento ? (
+              <p className="mt-3 text-sm font-semibold text-red-700">
+                Somente Administrador Geral ou produtor criador deste evento pode excluir.
+              </p>
+            ) : null}
+          </section>
+        ) : null}
       </div>
 
     </AdminShell>

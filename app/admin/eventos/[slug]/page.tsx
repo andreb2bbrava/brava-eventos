@@ -8,7 +8,10 @@ import { podeEditarEvento, validarAcessoEvento } from "@/lib/permissoes";
 import AdminShell from "@/app/components/AdminShell";
 import AdminEventTabs from "@/app/components/AdminEventTabs";
 import CopyLinkButton from "@/app/components/CopyLinkButton";
+import DeleteEventButton from "@/app/components/DeleteEventButton";
 import { gerarSlugUnicoLista } from "@/lib/slug";
+import { sanitizeMetaPixelId } from "@/lib/metaPixel";
+import { canEditEventRole, isAdminRole, type RoleUsuario } from "@/lib/roles";
 
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
@@ -22,6 +25,7 @@ type ListaEventoResumo = {
   regra: string | null;
   ativa: boolean;
   slug: string | null;
+  meta_pixel_id?: string | null;
   created_at?: string | null;
 };
 
@@ -87,6 +91,7 @@ export default function EventoDashboard() {
 
   const [roleUsuario, setRoleUsuario] =
     useState<string | null>(null);
+  const [usuarioId, setUsuarioId] = useState<string | null>(null);
 
   const [listasEvento, setListasEvento] =
     useState<ListaEventoResumo[]>([]);
@@ -96,6 +101,8 @@ export default function EventoDashboard() {
   const [listaRegra, setListaRegra] = useState("");
   const [listaTipo, setListaTipo] = useState("simples");
   const [listaVisibilidade, setListaVisibilidade] = useState("privada");
+  const [listaMetaPixelId, setListaMetaPixelId] = useState("");
+  const [listaMetaPixelInvalido, setListaMetaPixelInvalido] = useState(false);
   const [listaAtiva, setListaAtiva] = useState(true);
   const [listaEditandoId, setListaEditandoId] = useState<number | null>(null);
   const [salvandoLista, setSalvandoLista] = useState(false);
@@ -145,12 +152,16 @@ export default function EventoDashboard() {
     return listasAtualizadas;
   }
 
-  async function carregarListas(eventoId: number, podeCorrigirSlugLegado: boolean) {
-    const { data: listasData } = await supabase
-      .from("listas_evento")
-      .select("*")
-      .eq("evento_id", eventoId)
-      .order("created_at", { ascending: false });
+  async function carregarListas(eventoId: number, podeCorrigirSlugLegado: boolean, role: string | null) {
+    const selectComPixel = "*";
+    const selectSemPixel = "id,nome,tipo_lista,tipo_visibilidade,visibilidade,regra,ativa,slug,created_at";
+
+    const consultaBase = supabase.from("listas_evento");
+
+    const { data: listasData } =
+      isAdminRole(role) || role === "produtor"
+        ? await consultaBase.select(selectComPixel).eq("evento_id", eventoId).order("created_at", { ascending: false })
+        : await consultaBase.select(selectSemPixel).eq("evento_id", eventoId).order("created_at", { ascending: false });
 
     if (!listasData) {
       setListasEvento([]);
@@ -175,6 +186,12 @@ export default function EventoDashboard() {
 
     const { autorizado, evento: eventoData, erro, role } =
       await validarAcessoEvento(slug);
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    setUsuarioId(user?.id || null);
 
     if (!autorizado || !eventoData) {
       setAcessoNegado(true);
@@ -206,8 +223,8 @@ export default function EventoDashboard() {
       setParticipantes(data);
     }
 
-    const podeCorrigirSlugLegado = role === "super_admin" || role === "produtor";
-    await carregarListas(eventoData.id, podeCorrigirSlugLegado);
+    const podeCorrigirSlugLegado = canEditEventRole(role);
+    await carregarListas(eventoData.id, podeCorrigirSlugLegado, role ?? null);
   }
 
   async function salvarListaEvento(event: React.FormEvent<HTMLFormElement>) {
@@ -226,6 +243,18 @@ export default function EventoDashboard() {
         setMensagemLista("Informe o nome da lista para continuar.");
         return;
       }
+
+      const pixelIdInformado = (listaMetaPixelId || "").replace(/\s+/g, "").trim();
+      const pixelIdValido = sanitizeMetaPixelId(pixelIdInformado);
+      const possuiPixelInformado = pixelIdInformado.length > 0;
+
+      if (possuiPixelInformado && !pixelIdValido) {
+        setListaMetaPixelInvalido(true);
+        setMensagemLista("Informe um ID de Pixel válido.");
+        return;
+      }
+
+      setListaMetaPixelInvalido(false);
 
       const nomeNormalizado = normalizarNomeLista(listaNome);
 
@@ -293,6 +322,7 @@ export default function EventoDashboard() {
         regra: listaRegra.trim() || null,
         tipo_visibilidade: (listaVisibilidade || "privada").trim() || "privada",
         tipo_lista: (listaTipo || "simples").trim() || "simples",
+        meta_pixel_id: pixelIdValido || null,
         ativa: typeof listaAtiva === "boolean" ? listaAtiva : true,
         slug: slugGerado,
         criado_por: user.id,
@@ -338,14 +368,16 @@ export default function EventoDashboard() {
           setListasEvento((prev) => [listaPersistida, ...prev]);
         }
       } else {
-        const podeCorrigirSlugLegado = roleUsuario === "super_admin" || roleUsuario === "produtor";
-        await carregarListas(evento.id, podeCorrigirSlugLegado);
+        const podeCorrigirSlugLegado = canEditEventRole(roleUsuario);
+        await carregarListas(evento.id, podeCorrigirSlugLegado, roleUsuario ?? null);
       }
 
       setListaNome("");
       setListaRegra("");
       setListaTipo("simples");
       setListaVisibilidade("privada");
+      setListaMetaPixelId("");
+      setListaMetaPixelInvalido(false);
       setListaAtiva(true);
       setListaEditandoId(null);
       setMostrarCriarLista(false);
@@ -366,6 +398,8 @@ export default function EventoDashboard() {
     setListaRegra("");
     setListaTipo("simples");
     setListaVisibilidade("privada");
+    setListaMetaPixelId("");
+    setListaMetaPixelInvalido(false);
     setListaAtiva(true);
 
     requestAnimationFrame(() => {
@@ -384,6 +418,8 @@ export default function EventoDashboard() {
     setListaRegra(lista.regra || "");
     setListaTipo(lista.tipo_lista || "simples");
     setListaVisibilidade((lista.tipo_visibilidade || lista.visibilidade || "privada").toLowerCase());
+    setListaMetaPixelId((lista.meta_pixel_id || "").trim());
+    setListaMetaPixelInvalido(false);
     setListaAtiva(lista.ativa);
 
     requestAnimationFrame(() => {
@@ -414,6 +450,8 @@ export default function EventoDashboard() {
       setListaRegra("");
       setListaTipo("simples");
       setListaVisibilidade("privada");
+      setListaMetaPixelId("");
+      setListaMetaPixelInvalido(false);
       setListaAtiva(true);
       setMostrarCriarLista(false);
     }
@@ -807,10 +845,14 @@ export default function EventoDashboard() {
     );
   }
 
+  const podeExcluirEvento =
+    isAdminRole(roleUsuario) ||
+    (roleUsuario === "produtor" && Boolean(usuarioId) && String(evento.criador_id) === String(usuarioId));
+
   return (
 
     <AdminShell
-      role={(roleUsuario as "super_admin" | "produtor" | "staff" | null) ?? null}
+      role={(roleUsuario as RoleUsuario | null) ?? null}
       title="Central do Evento"
       subtitle={evento ? `Acompanhe convidados, check-in e performance operacional de ${evento.nome}.` : "Acompanhe o evento em tempo real."}
       breadcrumbs={[
@@ -866,7 +908,7 @@ export default function EventoDashboard() {
 
 <div className="flex gap-3 mt-5 flex-wrap justify-center w-full px-2">
 
-  {(roleUsuario === "super_admin" || roleUsuario === "produtor") && (
+  {(canEditEventRole(roleUsuario)) && (
     <>
       <Link
         href={`/admin/eventos/${evento.slug}/editar`}
@@ -912,6 +954,33 @@ export default function EventoDashboard() {
 
       </section>
 
+      {(canEditEventRole(roleUsuario)) ? (
+        <section className="rounded-3xl border border-red-200 bg-red-50/60 p-5 sm:p-6 shadow-sm">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-lg font-extrabold text-red-700">Zona de perigo</h2>
+              <p className="mt-1 text-sm text-red-700/90">
+                Exclui definitivamente o evento e todos os dados vinculados.
+              </p>
+            </div>
+
+            <DeleteEventButton
+              eventoId={evento.id}
+              eventoNome={evento.nome}
+              canDelete={podeExcluirEvento}
+              redirectToAdmin
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-red-300"
+            />
+          </div>
+
+          {!podeExcluirEvento ? (
+            <p className="mt-3 text-sm font-semibold text-red-700">
+              Somente Administrador Geral ou produtor criador deste evento pode excluir.
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
       <section id="listas-evento" className="rounded-3xl border border-blue-100 bg-white p-5 sm:p-6 shadow-sm">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -919,7 +988,7 @@ export default function EventoDashboard() {
             <p className="mt-1 text-sm text-slate-500">Crie e abra listas diretamente da Central do Evento.</p>
           </div>
 
-          {(roleUsuario === "super_admin" || roleUsuario === "produtor") && !mostrarCriarLista ? (
+          {(canEditEventRole(roleUsuario)) && !mostrarCriarLista ? (
             <button
               type="button"
               onClick={abrirCriacaoLista}
@@ -930,7 +999,7 @@ export default function EventoDashboard() {
           ) : null}
         </div>
 
-        {(roleUsuario === "super_admin" || roleUsuario === "produtor") && mostrarCriarLista ? (
+        {(canEditEventRole(roleUsuario)) && mostrarCriarLista ? (
           <form onSubmit={salvarListaEvento} className="mt-5 rounded-3xl border border-blue-100 bg-blue-50/40 p-4 sm:p-5">
             <div className="space-y-4">
               <div>
@@ -979,6 +1048,35 @@ export default function EventoDashboard() {
                 />
               </div>
 
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-blue-900">Meta Pixel ID</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={listaMetaPixelId}
+                  onChange={(e) => {
+                    setListaMetaPixelId(e.target.value.replace(/\s+/g, ""));
+                    if (listaMetaPixelInvalido) {
+                      setListaMetaPixelInvalido(false);
+                    }
+                    if (mensagemLista === "Informe um ID de Pixel válido.") {
+                      setMensagemLista("");
+                    }
+                  }}
+                  placeholder="123456789012345"
+                  className={`ui-field ${listaMetaPixelInvalido ? "ui-field-error" : ""}`}
+                />
+                <p className="mt-2 text-xs text-slate-500">
+                  Informe apenas o número do Pixel da Meta. Exemplo: 123456789012345.
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Este Pixel registrará acessos e cadastros realizados nesta lista pública.
+                </p>
+                {listaMetaPixelInvalido ? (
+                  <p className="mt-2 text-sm font-semibold text-red-600">Informe um ID de Pixel válido.</p>
+                ) : null}
+              </div>
+
               <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
                 <input
                   type="checkbox"
@@ -1005,6 +1103,8 @@ export default function EventoDashboard() {
                     setListaRegra("");
                     setListaTipo("simples");
                     setListaVisibilidade("privada");
+                    setListaMetaPixelId("");
+                    setListaMetaPixelInvalido(false);
                     setListaAtiva(true);
                   }}
                   className="ui-btn-secondary inline-flex min-h-11 items-center justify-center rounded-2xl px-5 py-3 text-sm font-bold transition"
@@ -1046,6 +1146,9 @@ export default function EventoDashboard() {
                 <p className="mt-1 text-sm text-slate-500">Visibilidade: {rotuloVisibilidadeLista(lista)}</p>
                 <p className="mt-1 text-sm text-slate-500">Regra: {lista.regra || "-"}</p>
                 <p className="mt-1 text-sm text-slate-500">Status: {lista.ativa ? "Ativa" : "Inativa"}</p>
+                {(canEditEventRole(roleUsuario)) && sanitizeMetaPixelId(lista.meta_pixel_id) ? (
+                  <p className="mt-1 text-sm font-semibold text-blue-700">Meta Pixel configurado</p>
+                ) : null}
 
                 <div className="mt-2">
                   {listaPublicaAtivaComSlug ? (
@@ -1076,7 +1179,7 @@ export default function EventoDashboard() {
                     Abrir Lista
                   </Link>
 
-                  {(roleUsuario === "super_admin" || roleUsuario === "produtor") ? (
+                  {(canEditEventRole(roleUsuario)) ? (
                     <>
                       <button
                         type="button"

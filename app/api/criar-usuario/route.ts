@@ -1,15 +1,10 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-type RoleUsuario = "super_admin" | "produtor" | "staff";
+import { registrarAuditLog } from "@/lib/auditoria";
+import { isAdminRole, isPlatformOwner, isRoleUsuario, type RoleUsuario } from "@/lib/roles";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 function roleValida(role: string): role is RoleUsuario {
-  return role === "super_admin" || role === "produtor" || role === "staff";
+  return isRoleUsuario(role);
 }
 
 function obterToken(request: Request) {
@@ -18,7 +13,7 @@ function obterToken(request: Request) {
   return token?.trim() || "";
 }
 
-async function validarSuperAdmin(request: Request) {
+async function validarAdmin(request: Request) {
   const token = obterToken(request);
 
   if (!token) {
@@ -37,16 +32,24 @@ async function validarSuperAdmin(request: Request) {
     .eq("id", authData.user.id)
     .single();
 
-  if (usuarioError || usuarioData?.role !== "super_admin") {
+  if (usuarioError || !isAdminRole(usuarioData?.role)) {
     return { ok: false as const, response: NextResponse.json({ error: "Usuario sem permissao." }, { status: 403 }) };
   }
 
-  return { ok: true as const };
+  return {
+    ok: true as const,
+    solicitante: {
+      id: authData.user.id,
+      role: usuarioData.role as RoleUsuario,
+      nome: null,
+      email: authData.user.email || null,
+    },
+  };
 }
 
 export async function POST(request: Request) {
   try {
-    const validacao = await validarSuperAdmin(request);
+    const validacao = await validarAdmin(request);
     if (!validacao.ok) {
       return validacao.response;
     }
@@ -59,6 +62,10 @@ export async function POST(request: Request) {
 
     if (!email || !password || !roleValida(role)) {
       return NextResponse.json({ error: "Dados invalidos para criar usuario." }, { status: 400 });
+    }
+
+    if (role === "platform_owner" && !isPlatformOwner(validacao.solicitante.role)) {
+      return NextResponse.json({ error: "Apenas o Proprietario da Plataforma pode criar este perfil." }, { status: 403 });
     }
 
     const { data, error } = await supabaseAdmin.auth.admin.createUser({
@@ -83,6 +90,29 @@ export async function POST(request: Request) {
     if (erroUsuario) {
       return NextResponse.json({ error: erroUsuario.message }, { status: 400 });
     }
+
+    await registrarAuditLog(
+      {
+        acao: "usuario_criado",
+        entidade: "usuario",
+        entidadeId: data.user.id,
+        descricao: `Criou o usuario ${email}.`,
+        dadosNovos: {
+          email,
+          nome: nome || null,
+          role,
+        },
+      },
+      {
+        request,
+        actor: {
+          id: validacao.solicitante.id,
+          nome: validacao.solicitante.nome,
+          email: validacao.solicitante.email,
+          role: validacao.solicitante.role,
+        },
+      }
+    );
 
     return NextResponse.json({ success: true });
   } catch (error) {

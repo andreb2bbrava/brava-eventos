@@ -4,12 +4,19 @@ import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import MetaPixel from "@/app/components/MetaPixel";
+import MarketingConsentBanner from "@/app/components/MarketingConsentBanner";
 import {
   erroEhDuplicidadeParticipante,
   extrairNomesUnicosPorLinha,
   mensagemDuplicidadeEvento,
   normalizarNomeParticipante,
 } from "@/lib/participantes";
+import {
+  type MarketingConsentStatus,
+  sanitizeMetaPixelId,
+  trackMetaCompleteRegistration,
+} from "@/lib/metaPixel";
 
 type EventoPublico = {
   id: number;
@@ -35,6 +42,7 @@ type ListaPublica = {
   tipo_lista: string | null;
   tipo_visibilidade: string | null;
   visibilidade: string | null;
+  meta_pixel_id: string | null;
   ativa: boolean;
 };
 
@@ -195,6 +203,25 @@ export default function ListaPublicaPage() {
   const [sexo, setSexo] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [mensagemSucesso, setMensagemSucesso] = useState("");
+  const [marketingConsentStatus, setMarketingConsentStatus] = useState<MarketingConsentStatus>("unknown");
+
+  const pixelIdValido = sanitizeMetaPixelId(lista?.meta_pixel_id);
+  const listaPublicaAtiva = Boolean(lista && lista.ativa && visibilidadeEhPublica(lista.tipo_visibilidade || lista.visibilidade));
+  const podeCarregarPixel = Boolean(listaPublicaAtiva && pixelIdValido && marketingConsentStatus === "accepted");
+
+  function registrarCompleteRegistration(numItems: number) {
+    if (!lista || !podeCarregarPixel || numItems <= 0) {
+      return;
+    }
+
+    const eventKey = `${lista.id}:${Date.now()}:${numItems}`;
+    trackMetaCompleteRegistration({
+      pixelId: pixelIdValido,
+      listaNome: lista.nome,
+      quantidade: numItems,
+      eventKey,
+    });
+  }
 
   useEffect(() => {
     async function carregarDados() {
@@ -223,7 +250,20 @@ export default function ListaPublicaPage() {
 
       const { data: listaData, error: erroLista } = await supabase
         .from("listas_evento")
-        .select("*")
+        .select(
+          `
+            id,
+            evento_id,
+            nome,
+            slug,
+            regra,
+            tipo_lista,
+            tipo_visibilidade,
+            visibilidade,
+            ativa,
+            meta_pixel_id
+          `
+        )
         .eq("evento_id", eventoData.id)
         .eq("slug", listaSlug)
         .single();
@@ -388,10 +428,12 @@ export default function ListaPublicaPage() {
       setNomesEmMassa("");
 
       if (ignorados === 0) {
+        registrarCompleteRegistration(payload.length);
         setMensagemSucesso(`${payload.length} nomes foram adicionados com sucesso.`);
         return;
       }
 
+      registrarCompleteRegistration(payload.length);
       setMensagemSucesso(`${payload.length} nomes foram adicionados. ${ignorados} nomes já estavam cadastrados neste evento e foram ignorados.`);
       return;
     }
@@ -498,6 +540,7 @@ export default function ListaPublicaPage() {
     setEmail("");
     setDataNascimento("");
     setSexo("");
+    registrarCompleteRegistration(1);
     setMensagemSucesso("Cadastro realizado com sucesso!");
   }
 
@@ -529,6 +572,7 @@ export default function ListaPublicaPage() {
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 overflow-x-hidden">
+      {podeCarregarPixel ? <MetaPixel pixelId={pixelIdValido} /> : null}
       <section className="w-full border-b border-blue-100 bg-white">
         {evento.banner_url ? (
           <img
@@ -655,6 +699,8 @@ export default function ListaPublicaPage() {
           </form>
         </div>
       </section>
+
+      {pixelIdValido ? <MarketingConsentBanner onStatusChange={setMarketingConsentStatus} /> : null}
     </main>
   );
 }
