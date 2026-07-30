@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { registrarAuditLog } from "@/lib/auditoria";
 import { canEditEventRole, isAdminRole, isRoleUsuario, type RoleUsuario } from "@/lib/roles";
-import { normalizarNomeParticipante } from "@/lib/participantes";
+import { erroEhDuplicidadeParticipante, normalizarNomeParticipante } from "@/lib/participantes";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 type UsuarioAutenticado = {
@@ -140,17 +140,6 @@ export async function POST(request: Request) {
 
       const nomeNormalizado = normalizarNomeParticipante(nome);
 
-      const { data: duplicado } = await supabaseAdmin
-        .from("participantes")
-        .select("id")
-        .eq("evento_id", eventoId)
-        .eq("nome_normalizado", nomeNormalizado)
-        .maybeSingle();
-
-      if (duplicado) {
-        return NextResponse.json({ error: "Este nome ja esta cadastrado neste evento." }, { status: 409 });
-      }
-
       const { data: novoParticipante, error } = await supabaseAdmin
         .from("participantes")
         .insert([
@@ -168,6 +157,10 @@ export async function POST(request: Request) {
         .single();
 
       if (error || !novoParticipante) {
+        if (erroEhDuplicidadeParticipante(error)) {
+          return NextResponse.json({ error: "Participante já cadastrado nesta lista." }, { status: 409 });
+        }
+
         return NextResponse.json({ error: "Nao foi possivel adicionar participante." }, { status: 400 });
       }
 
@@ -199,17 +192,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Informe ao menos um nome para importacao." }, { status: 400 });
     }
 
-    const nomesNormalizadosInformados = nomes.map((nome) => normalizarNomeParticipante(nome)).filter(Boolean);
-
-    const { data: participantesExistentes } = await supabaseAdmin
-      .from("participantes")
-      .select("id, nome_normalizado")
-      .eq("evento_id", eventoId)
-      .in("nome_normalizado", nomesNormalizadosInformados);
-
-    const nomesJaCadastrados = new Set((participantesExistentes || []).map((item) => item.nome_normalizado).filter(Boolean));
-    const nomesInseridos = new Set<string>();
-
     const payload: Array<{ evento_id: number; lista_id: number; nome: string; nome_normalizado: string; presente: boolean }> = [];
 
     for (const nome of nomes) {
@@ -218,11 +200,6 @@ export async function POST(request: Request) {
         continue;
       }
 
-      if (nomesJaCadastrados.has(nomeNormalizado) || nomesInseridos.has(nomeNormalizado)) {
-        continue;
-      }
-
-      nomesInseridos.add(nomeNormalizado);
       payload.push({
         evento_id: eventoId,
         lista_id: listaId,
@@ -239,6 +216,10 @@ export async function POST(request: Request) {
     const { error: insertError } = await supabaseAdmin.from("participantes").insert(payload);
 
     if (insertError) {
+      if (erroEhDuplicidadeParticipante(insertError)) {
+        return NextResponse.json({ error: "Participante já cadastrado nesta lista." }, { status: 409 });
+      }
+
       return NextResponse.json({ error: "Nao foi possivel importar participantes." }, { status: 400 });
     }
 

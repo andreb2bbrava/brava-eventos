@@ -357,63 +357,17 @@ export default function ListaPublicaPage() {
       setMensagemErro("");
       setMensagemSucesso("");
 
-      const nomesNormalizadosInformados = nomesValidos
-        .map((nomeLinha) => normalizarNomeParticipante(nomeLinha))
-        .filter(Boolean);
-
       debugLog("EVENTO PARA VALIDACAO:", evento.id);
       debugLog("NOMES INFORMADOS:", nomesValidos);
 
-      const { data: participantesData, error: erroParticipantes } = await supabase
-        .from("participantes")
-        .select("id, nome, nome_normalizado, lista_id, listas_evento(regra)")
-        .eq("evento_id", evento.id)
-        .in("nome_normalizado", nomesNormalizadosInformados);
-
-      if (erroParticipantes) {
-        const contexto = erroParticipantes?.code === "PGRST204" ? "ERRO TECNICO VALIDACAO DUPLICIDADE (PGRST204)" : "ERRO VALIDACAO DUPLICIDADE";
-        console.error(contexto, {
-          message: erroParticipantes?.message,
-          details: erroParticipantes?.details,
-          hint: erroParticipantes?.hint,
-          code: erroParticipantes?.code,
-          error: erroParticipantes,
-        });
-        setSalvando(false);
-        setMensagemErro("Não foi possível verificar os participantes deste evento. Tente novamente.");
-        return;
-      }
-
-      const participantesExistentes = (participantesData || []) as ParticipanteDuplicidadeRow[];
-      const { nomesExistentes, participantePorNome } = criarIndiceParticipantesEvento(participantesExistentes);
-
-      debugLog("PARTICIPANTES EXISTENTES:", participantesExistentes);
-      debugLog("NOMES NORMALIZADOS EXISTENTES:", Array.from(nomesExistentes));
-
       const payload: Array<{ evento_id: number; lista_id: number; nome: string; nome_normalizado: string; presente: boolean }> = [];
-      let ignorados = 0;
-      const nomesNovos: string[] = [];
-      const duplicados: Array<{ nome: string; participante: ParticipanteDuplicidadeRow | null }> = [];
 
       nomesValidos.forEach((nomeLinha) => {
         const nomeNormalizado = normalizarNomeParticipante(nomeLinha);
 
         if (!nomeNormalizado) {
-          ignorados += 1;
           return;
         }
-
-        if (nomesExistentes.has(nomeNormalizado)) {
-          duplicados.push({
-            nome: nomeLinha,
-            participante: participantePorNome.get(nomeNormalizado) || null,
-          });
-          ignorados += 1;
-          return;
-        }
-
-        nomesExistentes.add(nomeNormalizado);
-        nomesNovos.push(nomeLinha);
 
         payload.push({
           evento_id: evento.id,
@@ -424,20 +378,10 @@ export default function ListaPublicaPage() {
         });
       });
 
-      debugLog("NOMES NOVOS:", nomesNovos);
-      debugLog(
-        "DUPLICADOS REAIS:",
-        duplicados.map((item) => ({
-          nome: item.nome,
-          participanteId: item.participante?.id || null,
-          regra: item.participante ? obterRegraDuplicada(item.participante) : null,
-        }))
-      );
-
       if (payload.length === 0) {
         setSalvando(false);
         setMensagemErro("");
-        setMensagemSucesso("Todos os nomes informados já estão cadastrados neste evento.");
+        setMensagemSucesso("Informe pelo menos um nome válido para continuar.");
         return;
       }
 
@@ -448,7 +392,7 @@ export default function ListaPublicaPage() {
       if (erroInsert) {
         logSupabaseError("inserir-participantes-publico-simples", erroInsert);
         if (erroEhDuplicidadeParticipante(erroInsert)) {
-          setMensagemErro("Este nome já está cadastrado neste evento.");
+          setMensagemErro("Participante já cadastrado nesta lista.");
           return;
         }
         setMensagemErro("Não foi possível concluir o cadastro. Tente novamente.");
@@ -457,14 +401,8 @@ export default function ListaPublicaPage() {
 
       setNomesEmMassa("");
 
-      if (ignorados === 0) {
-        registrarCompleteRegistration(payload.length);
-        setMensagemSucesso(`${payload.length} nomes foram adicionados com sucesso.`);
-        return;
-      }
-
       registrarCompleteRegistration(payload.length);
-      setMensagemSucesso(`${payload.length} nomes foram adicionados. ${ignorados} nomes já estavam cadastrados neste evento e foram ignorados.`);
+      setMensagemSucesso(`${payload.length} nomes foram adicionados com sucesso.`);
       return;
     }
 
@@ -485,58 +423,6 @@ export default function ListaPublicaPage() {
     setMensagemSucesso("");
 
     const nomeNormalizado = normalizarNomeParticipante(nome);
-    const nomesInformados = [nome.trim()];
-
-    debugLog("EVENTO PARA VALIDACAO:", evento.id);
-    debugLog("NOMES INFORMADOS:", nomesInformados);
-
-    const { data: participantesData, error: erroParticipantes } = await supabase
-      .from("participantes")
-      .select("id, nome, nome_normalizado, lista_id, listas_evento(regra)")
-      .eq("evento_id", evento.id)
-      .eq("nome_normalizado", nomeNormalizado)
-      .limit(1);
-
-    if (erroParticipantes) {
-      const contexto = erroParticipantes?.code === "PGRST204" ? "ERRO TECNICO VALIDACAO DUPLICIDADE (PGRST204)" : "ERRO VALIDACAO DUPLICIDADE";
-      console.error(contexto, {
-        message: erroParticipantes?.message,
-        details: erroParticipantes?.details,
-        hint: erroParticipantes?.hint,
-        code: erroParticipantes?.code,
-        error: erroParticipantes,
-      });
-      setSalvando(false);
-      setMensagemErro("Não foi possível verificar os participantes deste evento. Tente novamente.");
-      return;
-    }
-
-    const participantesExistentes = (participantesData || []) as ParticipanteDuplicidadeRow[];
-    const duplicado = participantesExistentes[0] || null;
-    const jaExiste = !!duplicado;
-
-    const { nomesExistentes } = criarIndiceParticipantesEvento(participantesExistentes);
-    debugLog("PARTICIPANTES EXISTENTES:", participantesExistentes);
-    debugLog("NOMES NORMALIZADOS EXISTENTES:", Array.from(nomesExistentes));
-    debugLog("NOMES NOVOS:", jaExiste ? [] : nomesInformados);
-    debugLog(
-      "DUPLICADOS REAIS:",
-      jaExiste
-        ? [
-            {
-              nome: nome.trim(),
-              participanteId: duplicado.id,
-              regra: obterRegraDuplicada(duplicado),
-            },
-          ]
-        : []
-    );
-
-    if (jaExiste) {
-      setSalvando(false);
-      setMensagemErro(mensagemDuplicidadeEvento(nome.trim(), obterRegraDuplicada(duplicado)));
-      return;
-    }
 
     const payload = {
       evento_id: evento.id,
@@ -558,7 +444,7 @@ export default function ListaPublicaPage() {
     if (erroInsert) {
       logSupabaseError("inserir-participante-publico-vip", erroInsert);
       if (erroEhDuplicidadeParticipante(erroInsert)) {
-        setMensagemErro("Este nome já está cadastrado neste evento.");
+        setMensagemErro("Participante já cadastrado nesta lista.");
         return;
       }
       setMensagemErro("Não foi possível concluir o cadastro. Tente novamente.");

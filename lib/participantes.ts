@@ -5,12 +5,12 @@ export type SupabaseLikeError = {
   code?: string;
 } | null;
 
-export function normalizarNomeParticipante(valor: string) {
-  return valor
-    .trim()
-    .toLowerCase()
+export function normalizarNomeParticipante(valor: string | null | undefined) {
+  return String(valor ?? "")
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
     .replace(/\s+/g, " ");
 }
 
