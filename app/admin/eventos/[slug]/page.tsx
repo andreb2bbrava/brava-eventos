@@ -29,6 +29,37 @@ type ListaEventoResumo = {
   created_at?: string | null;
 };
 
+type EscopoExportacaoExcel = "evento-completo" | "lista-atual";
+
+type LinhaParticipanteExportacao = {
+  ordemCadastro: number;
+  nome: string;
+  whatsapp: string;
+  email: string;
+  lista: string;
+  regraLista: string;
+  status: string;
+  checkin: string;
+  observacoes: string;
+};
+
+type ColunaExportacao<Row> = {
+  cabecalho: string;
+  valor: (row: Row) => string;
+};
+
+const colunasParticipantesExportacao: ColunaExportacao<LinhaParticipanteExportacao>[] = [
+  { cabecalho: "Ordem Cadastro", valor: (row) => String(row.ordemCadastro) },
+  { cabecalho: "Nome", valor: (row) => row.nome },
+  { cabecalho: "WhatsApp", valor: (row) => row.whatsapp },
+  { cabecalho: "Email", valor: (row) => row.email },
+  { cabecalho: "Lista", valor: (row) => row.lista },
+  { cabecalho: "Regra da Lista", valor: (row) => row.regraLista },
+  { cabecalho: "Status", valor: (row) => row.status },
+  { cabecalho: "Check-in", valor: (row) => row.checkin },
+  { cabecalho: "Observações", valor: (row) => row.observacoes },
+];
+
 function rotuloTipoLista(tipoLista: string | null) {
   return tipoLista === "vip" ? "Lista Completa" : "Lista Simples";
 }
@@ -109,6 +140,7 @@ export default function EventoDashboard() {
   const [mensagemLista, setMensagemLista] = useState("");
   const [mensagemParticipante, setMensagemParticipante] = useState<{ tipo: "sucesso" | "erro"; texto: string } | null>(null);
   const [processandoParticipanteId, setProcessandoParticipanteId] = useState<number | null>(null);
+  const [listaAtualExportacaoId, setListaAtualExportacaoId] = useState<number | null>(null);
 
   const mostrarMensagemCriacao = useMemo(() => searchParams.get("criado") === "1", [searchParams]);
 
@@ -584,71 +616,100 @@ export default function EventoDashboard() {
 
   // EXPORTAR EXCEL
 
-  function exportarExcel() {
+  function montarLinhasParticipantesExportacao(participantesBase: any[]): LinhaParticipanteExportacao[] {
+    return participantesBase.map((participante, index) => {
+      const dadosLista = infoLista(participante);
+      return {
+        ordemCadastro: index + 1,
+        nome: participante.nome || "",
+        whatsapp: participante.whatsapp || "",
+        email: participante.email || "",
+        lista: dadosLista.nome,
+        regraLista: dadosLista.regra,
+        status: participante.presente ? "PRESENTE" : "PENDENTE",
+        checkin: participante.entrada_confirmada_em
+          ? new Date(participante.entrada_confirmada_em).toLocaleTimeString("pt-BR")
+          : "",
+        observacoes: "",
+      };
+    });
+  }
 
-    const dados =
-      participantes.map((p) => ({
+  function normalizarNomeArquivo(valor: string) {
+    return (valor || "")
+      .replace(/[\\/:*?"<>|]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
 
-        Nome: p.nome,
+  function montarNomeArquivoExportacao(escopo: EscopoExportacaoExcel, listaAtualSelecionada: ListaEventoResumo | null) {
+    const nomeEvento = normalizarNomeArquivo(evento?.nome || "Evento");
 
-        WhatsApp:
-          p.whatsapp || "",
+    if (escopo === "evento-completo") {
+      return `${nomeEvento} - Evento Completo.xlsx`;
+    }
 
-        Email:
-          p.email || "",
+    const nomeLista = normalizarNomeArquivo(listaAtualSelecionada?.nome || "Lista");
+    return `${nomeEvento} - Lista ${nomeLista}.xlsx`;
+  }
 
-        Status:
-          p.presente
-            ? "PRESENTE"
-            : "PENDENTE",
+  function exportarExcel(escopo: EscopoExportacaoExcel) {
+    const listaAtualSelecionada =
+      escopo === "lista-atual"
+        ? listasEvento.find((lista) => lista.id === listaAtualExportacaoId) || null
+        : null;
 
-        Entrada:
-          p.entrada_confirmada_em
-            ? new Date(
-                p.entrada_confirmada_em
-              ).toLocaleTimeString(
-                "pt-BR"
-              )
-            : "",
+    const participantesBase =
+      escopo === "lista-atual" && listaAtualSelecionada
+        ? participantes.filter((participante) => Number(participante.lista_id) === Number(listaAtualSelecionada.id))
+        : participantes;
 
-      }));
+    const linhasParticipantes = montarLinhasParticipantesExportacao(participantesBase);
+    const totalInscritos = participantesBase.length;
+    const totalPresentes = participantesBase.filter((participante) => participante.presente).length;
+    const dataHoraExportacao = new Date().toLocaleString("pt-BR");
 
-    const worksheet =
-      XLSX.utils.json_to_sheet(
-        dados
-      );
+    const nomeListaCabecalho =
+      escopo === "lista-atual"
+        ? listaAtualSelecionada?.nome || "Sem lista selecionada"
+        : "Evento completo";
 
-    const workbook =
-      XLSX.utils.book_new();
+    const regraListaCabecalho =
+      escopo === "lista-atual"
+        ? (listaAtualSelecionada?.regra || "").trim() || "Sem regra definida"
+        : "Regras por participante";
 
-    XLSX.utils.book_append_sheet(
-      workbook,
-      worksheet,
-      "Participantes"
+    const cabecalho = [
+      ["BRAVA EVENTOS", ""],
+      [],
+      ["Evento", evento?.nome || "-"],
+      ["Lista", nomeListaCabecalho],
+      ["Regra da Lista", regraListaCabecalho],
+      ["Data e hora da exportação", dataHoraExportacao],
+      ["Total de inscritos", String(totalInscritos)],
+      ["Total de presentes", String(totalPresentes)],
+      [],
+    ];
+
+    const cabecalhoTabela = colunasParticipantesExportacao.map((coluna) => coluna.cabecalho);
+    const linhasTabela = linhasParticipantes.map((linha) =>
+      colunasParticipantesExportacao.map((coluna) => coluna.valor(linha))
     );
 
-    const excelBuffer =
-      XLSX.write(
-        workbook,
-        {
-          bookType: "xlsx",
-          type: "array",
-        }
-      );
+    const worksheet = XLSX.utils.aoa_to_sheet([...cabecalho, cabecalhoTabela, ...linhasTabela]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Participantes");
 
-    const fileData =
-      new Blob(
-        [excelBuffer],
-        {
-          type:
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8",
-        }
-      );
+    const excelBuffer = XLSX.write(workbook, {
+      bookType: "xlsx",
+      type: "array",
+    });
 
-    saveAs(
-      fileData,
-      `${evento.slug}.xlsx`
-    );
+    const fileData = new Blob([excelBuffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8",
+    });
+
+    saveAs(fileData, montarNomeArquivoExportacao(escopo, listaAtualSelecionada));
   }
 
   // EXPORTAR XML
@@ -704,6 +765,18 @@ export default function EventoDashboard() {
       setMostrarCriarLista(true);
     }
   }, [mostrarMensagemCriacao]);
+
+  useEffect(() => {
+    if (listasEvento.length === 0) {
+      setListaAtualExportacaoId(null);
+      return;
+    }
+
+    const listaSelecionadaExiste = listasEvento.some((lista) => lista.id === listaAtualExportacaoId);
+    if (!listaSelecionadaExiste) {
+      setListaAtualExportacaoId(listasEvento[0].id);
+    }
+  }, [listasEvento, listaAtualExportacaoId]);
 
   // FILTRO + BUSCA
 
@@ -1278,13 +1351,37 @@ export default function EventoDashboard() {
 
         {/* EXPORTAÇÃO */}
 
-        <div className="flex gap-3 mb-6 flex-wrap">
+        <div className="flex gap-3 mb-6 flex-wrap items-center">
+
+          <select
+            value={listaAtualExportacaoId ?? ""}
+            onChange={(e) => setListaAtualExportacaoId(e.target.value ? Number(e.target.value) : null)}
+            className="ui-field max-w-xs"
+          >
+            {listasEvento.length === 0 ? (
+              <option value="">Sem listas</option>
+            ) : (
+              listasEvento.map((lista) => (
+                <option key={lista.id} value={lista.id}>
+                  {lista.nome}
+                </option>
+              ))
+            )}
+          </select>
 
           <button
-            onClick={exportarExcel}
+            onClick={() => exportarExcel("evento-completo")}
             className="bg-green-500 hover:bg-green-400 text-white px-5 py-3 rounded-2xl font-bold transition min-h-11"
           >
-            Exportar Excel
+            Exportar Evento Completo
+          </button>
+
+          <button
+            onClick={() => exportarExcel("lista-atual")}
+            disabled={!listaAtualExportacaoId}
+            className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-3 rounded-2xl font-bold transition min-h-11 disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            Exportar Apenas a Lista Atual
           </button>
 
           <button
