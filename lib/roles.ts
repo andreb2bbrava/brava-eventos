@@ -22,6 +22,10 @@ export function canCheckinRole(role: string | null | undefined) {
   return canEditEventRole(role) || role === "staff";
 }
 
+export function canExportParticipantsRole(role: string | null | undefined) {
+  return canEditEventRole(role);
+}
+
 export function roleLabel(role: string | null | undefined) {
   if (role === "platform_owner") {
     return "Proprietario da Plataforma";

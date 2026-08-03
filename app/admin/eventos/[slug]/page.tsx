@@ -11,7 +11,7 @@ import CopyLinkButton from "@/app/components/CopyLinkButton";
 import DeleteEventButton from "@/app/components/DeleteEventButton";
 import { gerarSlugUnicoLista } from "@/lib/slug";
 import { sanitizeMetaPixelId } from "@/lib/metaPixel";
-import { canEditEventRole, isAdminRole, type RoleUsuario } from "@/lib/roles";
+import { canEditEventRole, canExportParticipantsRole, isAdminRole, type RoleUsuario } from "@/lib/roles";
 
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
@@ -653,7 +653,23 @@ export default function EventoDashboard() {
     return `${nomeEvento} - Lista ${nomeLista}.xlsx`;
   }
 
+  function validarPermissaoExportacaoParticipantes() {
+    if (canExportParticipantsRole(roleUsuario)) {
+      return true;
+    }
+
+    setMensagemParticipante({
+      tipo: "erro",
+      texto: "Seu perfil nao possui permissao para exportar participantes deste evento.",
+    });
+    return false;
+  }
+
   function exportarExcel(escopo: EscopoExportacaoExcel) {
+    if (!validarPermissaoExportacaoParticipantes()) {
+      return;
+    }
+
     const listaAtualSelecionada =
       escopo === "lista-atual"
         ? listasEvento.find((lista) => lista.id === listaAtualExportacaoId) || null
@@ -715,6 +731,9 @@ export default function EventoDashboard() {
   // EXPORTAR XML
 
   function exportarXML() {
+    if (!validarPermissaoExportacaoParticipantes()) {
+      return;
+    }
 
     let xml =
       `<?xml version="1.0" encoding="UTF-8"?>`;
@@ -921,6 +940,7 @@ export default function EventoDashboard() {
   const podeExcluirEvento =
     isAdminRole(roleUsuario) ||
     (roleUsuario === "produtor" && Boolean(usuarioId) && String(evento.criador_id) === String(usuarioId));
+  const podeExportarParticipantes = canExportParticipantsRole(roleUsuario);
 
   return (
 
@@ -1351,47 +1371,49 @@ export default function EventoDashboard() {
 
         {/* EXPORTAÇÃO */}
 
-        <div className="flex gap-3 mb-6 flex-wrap items-center">
+        {podeExportarParticipantes ? (
+          <div className="flex gap-3 mb-6 flex-wrap items-center">
 
-          <select
-            value={listaAtualExportacaoId ?? ""}
-            onChange={(e) => setListaAtualExportacaoId(e.target.value ? Number(e.target.value) : null)}
-            className="ui-field max-w-xs"
-          >
-            {listasEvento.length === 0 ? (
-              <option value="">Sem listas</option>
-            ) : (
-              listasEvento.map((lista) => (
-                <option key={lista.id} value={lista.id}>
-                  {lista.nome}
-                </option>
-              ))
-            )}
-          </select>
+            <select
+              value={listaAtualExportacaoId ?? ""}
+              onChange={(e) => setListaAtualExportacaoId(e.target.value ? Number(e.target.value) : null)}
+              className="ui-field max-w-xs"
+            >
+              {listasEvento.length === 0 ? (
+                <option value="">Sem listas</option>
+              ) : (
+                listasEvento.map((lista) => (
+                  <option key={lista.id} value={lista.id}>
+                    {lista.nome}
+                  </option>
+                ))
+              )}
+            </select>
 
-          <button
-            onClick={() => exportarExcel("evento-completo")}
-            className="bg-green-500 hover:bg-green-400 text-white px-5 py-3 rounded-2xl font-bold transition min-h-11"
-          >
-            Exportar Evento Completo
-          </button>
+            <button
+              onClick={() => exportarExcel("evento-completo")}
+              className="bg-green-500 hover:bg-green-400 text-white px-5 py-3 rounded-2xl font-bold transition min-h-11"
+            >
+              Exportar Evento Completo
+            </button>
 
-          <button
-            onClick={() => exportarExcel("lista-atual")}
-            disabled={!listaAtualExportacaoId}
-            className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-3 rounded-2xl font-bold transition min-h-11 disabled:cursor-not-allowed disabled:bg-slate-300"
-          >
-            Exportar Apenas a Lista Atual
-          </button>
+            <button
+              onClick={() => exportarExcel("lista-atual")}
+              disabled={!listaAtualExportacaoId}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-3 rounded-2xl font-bold transition min-h-11 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              Exportar Apenas a Lista Atual
+            </button>
 
-          <button
-            onClick={exportarXML}
-            className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-2xl font-bold transition min-h-11"
-          >
-            Exportar XML
-          </button>
+            <button
+              onClick={exportarXML}
+              className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-2xl font-bold transition min-h-11"
+            >
+              Exportar XML
+            </button>
 
-        </div>
+          </div>
+        ) : null}
 
         {/* BUSCA */}
 
