@@ -222,7 +222,7 @@ begin
   end if;
 
   if tg_op = 'UPDATE' then
-    if coalesce(old.tipo_visibilidade, old.visibilidade, '') is distinct from coalesce(new.tipo_visibilidade, new.visibilidade, '') then
+    if coalesce(old.tipo_visibilidade, '') is distinct from coalesce(new.tipo_visibilidade, '') then
       v_acao := 'lista_visibilidade_alterada';
       v_descricao := format('Alterou a visibilidade da lista %s no evento %s.', coalesce(new.nome, old.nome, 'Sem nome'), coalesce(v_nome_evento, 'Sem nome'));
     elsif coalesce(old.meta_pixel_id, '') is distinct from coalesce(new.meta_pixel_id, '') then
