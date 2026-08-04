@@ -11,6 +11,7 @@ import {
   extrairNomesUnicosPorLinha,
   mensagemDuplicidadeEvento,
   normalizarNomeParticipante,
+  validarNomeCompletoParticipante,
 } from "@/lib/participantes";
 import { canEditEventRole, canCheckinRole, isAdminRole, type RoleUsuario } from "@/lib/roles";
 
@@ -44,6 +45,12 @@ type ParticipanteDuplicidadeRow = {
   nome_normalizado: string | null;
   lista_id: number | null;
   listas_evento?: { regra: string | null } | Array<{ regra: string | null }> | null;
+};
+
+type ResumoImportacao = {
+  inseridos: number;
+  ignorados: number;
+  ignoradosNomes: string[];
 };
 
 function obterRegraDuplicada(row: ParticipanteDuplicidadeRow | null | undefined) {
@@ -121,6 +128,8 @@ export default function ParticipantesDaListaPage() {
   const [mensagemCadastro, setMensagemCadastro] = useState("");
   const [erroCadastro, setErroCadastro] = useState(false);
   const [excluindoParticipanteId, setExcluindoParticipanteId] = useState<number | null>(null);
+  const [resumoImportacao, setResumoImportacao] = useState<ResumoImportacao | null>(null);
+  const [mostrarIgnorados, setMostrarIgnorados] = useState(false);
 
   const [nome, setNome] = useState("");
   const [telefone, setTelefone] = useState("");
@@ -297,6 +306,8 @@ export default function ParticipantesDaListaPage() {
 
     setMensagemCadastro("");
     setErroCadastro(false);
+    setResumoImportacao(null);
+    setMostrarIgnorados(false);
 
     if (!evento || !lista) {
       setErroCadastro(true);
@@ -331,42 +342,73 @@ export default function ParticipantesDaListaPage() {
       return;
     }
 
-    const response = await fetch("/api/participantes", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({
-        modo: "bulk",
-        eventoId: evento.id,
-        listaId: lista.id,
-        nomes,
-      }),
+    const nomesValidos: string[] = [];
+    const ignoradosNomes: string[] = [];
+
+    nomes.forEach((nomeItem) => {
+      const validacao = validarNomeCompletoParticipante(nomeItem);
+      if (!validacao.valido) {
+        ignoradosNomes.push(`${nomeItem} (nome invalido)`);
+        return;
+      }
+
+      nomesValidos.push(validacao.nomeAjustado);
     });
 
-    const result = await response.json();
+    let inseridos = 0;
+
+    for (const nomeValido of nomesValidos) {
+      try {
+        const response = await fetch("/api/participantes", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            modo: "single",
+            eventoId: evento.id,
+            listaId: lista.id,
+            participante: {
+              nome: nomeValido,
+              whatsapp: null,
+              email: null,
+            },
+          }),
+        });
+
+        const result = await response.json();
+
+        if (response.ok && !result.error) {
+          inseridos += 1;
+          continue;
+        }
+
+        if (response.status === 409 || String(result.error || "").toLowerCase().includes("ja cadastrado")) {
+          ignoradosNomes.push(nomeValido);
+          continue;
+        }
+
+        ignoradosNomes.push(`${nomeValido} (erro ao importar)`);
+      } catch {
+        ignoradosNomes.push(`${nomeValido} (erro ao importar)`);
+      }
+    }
+
     setSalvandoSimples(false);
 
-    if (!response.ok || result.error) {
-      setErroCadastro(true);
-      setMensagemCadastro(result.error || "Nao foi possivel concluir a importacao.");
-      return;
+    if (inseridos > 0) {
+      await carregarParticipantes(evento.id, lista.id);
     }
-
-    const inseridos = Number(result.inseridos || 0);
-    const ignorados = Number(result.ignorados || 0);
 
     setNomesEmMassa("");
-    await carregarParticipantes(evento.id, lista.id);
     setErroCadastro(false);
-
-    if (ignorados <= 0) {
-      setMensagemCadastro(`${inseridos} nomes foram adicionados com sucesso.`);
-      return;
-    }
-
-    setMensagemCadastro(`${inseridos} nomes foram adicionados. ${ignorados} nomes ja estavam cadastrados neste evento e foram ignorados.`);
+    setMensagemCadastro("Importacao concluida.");
+    setResumoImportacao({
+      inseridos,
+      ignorados: ignoradosNomes.length,
+      ignoradosNomes,
+    });
   }
 
   async function adicionarParticipanteCompleto(e: FormEvent) {
@@ -374,6 +416,8 @@ export default function ParticipantesDaListaPage() {
 
     setMensagemCadastro("");
     setErroCadastro(false);
+    setResumoImportacao(null);
+    setMostrarIgnorados(false);
 
     if (!evento || !lista) {
       setErroCadastro(true);
@@ -387,9 +431,11 @@ export default function ParticipantesDaListaPage() {
       return;
     }
 
-    if (!nome.trim()) {
+    const validacaoNome = validarNomeCompletoParticipante(nome);
+
+    if (!validacaoNome.valido) {
       setErroCadastro(true);
-      setMensagemCadastro("O nome é obrigatório para a Lista Completa.");
+      setMensagemCadastro(validacaoNome.motivo);
       return;
     }
 
@@ -417,7 +463,7 @@ export default function ParticipantesDaListaPage() {
         eventoId: evento.id,
         listaId: lista.id,
         participante: {
-          nome: nome.trim(),
+          nome: validacaoNome.nomeAjustado,
           whatsapp: telefone.trim() || null,
           email: email.trim() || null,
         },
@@ -625,11 +671,39 @@ export default function ParticipantesDaListaPage() {
               </p>
             ) : null}
 
+            {resumoImportacao ? (
+              <div className="mb-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-semibold text-green-700 space-y-2">
+                <p>Importacao concluida.</p>
+                <p>✔ {resumoImportacao.inseridos} participantes adicionados.</p>
+                <p>⚠ {resumoImportacao.ignorados} participantes ignorados.</p>
+
+                {resumoImportacao.ignorados > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setMostrarIgnorados((prev) => !prev)}
+                    className="inline-flex min-h-10 items-center justify-center rounded-xl border border-amber-300 bg-amber-100 px-4 py-2 text-xs font-bold text-amber-800 transition hover:bg-amber-200"
+                  >
+                    {mostrarIgnorados ? "Ocultar participantes ignorados" : "Ver participantes ignorados"}
+                  </button>
+                ) : null}
+
+                {mostrarIgnorados && resumoImportacao.ignoradosNomes.length > 0 ? (
+                  <div className="max-h-44 overflow-y-auto rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
+                    <ul className="space-y-1 text-xs">
+                      {resumoImportacao.ignoradosNomes.map((item, index) => (
+                        <li key={`${item}-${index}`}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             <form onSubmit={importarParticipantesSimples} className="space-y-4">
               <textarea
                 value={nomesEmMassa}
                 onChange={(e) => setNomesEmMassa(e.target.value)}
-                placeholder="Digite um nome por linha"
+                placeholder="Digite nome e sobrenome, um por linha"
                 className="ui-field h-48"
                 disabled={!podeCadastrarParticipante || salvandoSimples}
               />

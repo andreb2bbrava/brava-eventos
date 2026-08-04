@@ -12,6 +12,7 @@ import {
   mensagemDuplicidadeEvento,
   normalizarNomeParticipante,
 } from "@/lib/participantes";
+import { classificarParticipante } from "@/lib/inteligencia";
 import {
   type MarketingConsentStatus,
   sanitizeMetaPixelId,
@@ -360,7 +361,19 @@ export default function ListaPublicaPage() {
       debugLog("EVENTO PARA VALIDACAO:", evento.id);
       debugLog("NOMES INFORMADOS:", nomesValidos);
 
-      const payload: Array<{ evento_id: number; lista_id: number; nome: string; nome_normalizado: string; presente: boolean }> = [];
+      const payload: Array<{
+        evento_id: number;
+        lista_id: number;
+        nome: string;
+        nome_normalizado: string;
+        sexo_estimado: string;
+        confianca_sexo: number;
+        metodo_classificacao: string;
+        motor_inteligencia: string;
+        versao_motor: string;
+        classificado_em: string;
+        presente: boolean;
+      }> = [];
 
       nomesValidos.forEach((nomeLinha) => {
         const nomeNormalizado = normalizarNomeParticipante(nomeLinha);
@@ -369,11 +382,19 @@ export default function ListaPublicaPage() {
           return;
         }
 
+        const classificacao = classificarParticipante(nomeLinha);
+
         payload.push({
           evento_id: evento.id,
           lista_id: lista.id,
           nome: nomeLinha,
           nome_normalizado: nomeNormalizado,
+          sexo_estimado: classificacao.sexoEstimado,
+          confianca_sexo: classificacao.confiancaSexo,
+          metodo_classificacao: classificacao.metodoClassificacao,
+          motor_inteligencia: classificacao.motorInteligencia,
+          versao_motor: classificacao.versaoMotor,
+          classificado_em: classificacao.classificadoEm,
           presente: false,
         });
       });
@@ -423,6 +444,7 @@ export default function ListaPublicaPage() {
     setMensagemSucesso("");
 
     const nomeNormalizado = normalizarNomeParticipante(nome);
+    const classificacao = classificarParticipante(nome);
 
     const payload = {
       evento_id: evento.id,
@@ -434,6 +456,12 @@ export default function ListaPublicaPage() {
       email: email.trim() || null,
       data_nascimento: dataNascimento || null,
       sexo: sexo.trim() || null,
+      sexo_estimado: classificacao.sexoEstimado,
+      confianca_sexo: classificacao.confiancaSexo,
+      metodo_classificacao: classificacao.metodoClassificacao,
+      motor_inteligencia: classificacao.motorInteligencia,
+      versao_motor: classificacao.versaoMotor,
+      classificado_em: classificacao.classificadoEm,
       presente: false,
     };
 

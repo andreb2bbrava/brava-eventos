@@ -1,0 +1,95 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "build-sprint-3-2-2",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diagnostico-indeterminados-top100-csv",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"set -a && source .env.local && set +a && npx --yes tsx scripts/diagnosticarIndeterminados.ts"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retro-classificacao-3-2-3",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"set -a && source .env.local && set +a && npx --yes tsx scripts/classificarParticipantesExistentes.ts"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diagnostico-3-2-3",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"set -a && source .env.local && set +a && npx --yes tsx scripts/diagnosticarIndeterminados.ts"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retro-classificacao-3-2-3-b",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"set -a && source .env.local && set +a && npx --yes tsx scripts/classificarParticipantesExistentes.ts"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diagnostico-3-2-3-b",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"set -a && source .env.local && set +a && npx --yes tsx scripts/diagnosticarIndeterminados.ts"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build-3-2-3",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "reclassificar-todos-3-2-3",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"set -a && source .env.local && set +a && npx --yes tsx scripts/classificarParticipantesExistentes.ts"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build-sprint-3-3",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false
+		}
+	]
+}

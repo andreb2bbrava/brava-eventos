@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { podeEditarEvento, validarAcessoEvento } from "@/lib/permissoes";
+import { calcularIndicadoresParticipantes } from "@/lib/participantes";
 import AdminShell from "@/app/components/AdminShell";
 import AdminEventTabs from "@/app/components/AdminEventTabs";
 import CopyLinkButton from "@/app/components/CopyLinkButton";
@@ -95,6 +96,28 @@ function slugListaEhValido(valor: string | null | undefined) {
   return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug);
 }
 
+function normalizarTextoBusca(valor: unknown) {
+  return String(valor || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function sexoParticipanteFiltro(valor: unknown) {
+  const sexo = normalizarTextoBusca(valor);
+
+  if (sexo === "masculino") {
+    return "masculino" as const;
+  }
+
+  if (sexo === "feminino") {
+    return "feminino" as const;
+  }
+
+  return "indeterminado" as const;
+}
+
 export default function EventoDashboard() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -114,8 +137,20 @@ export default function EventoDashboard() {
   const [busca, setBusca] =
     useState("");
 
-  const [filtro, setFiltro] =
-    useState("todos");
+  const [filtroStatus, setFiltroStatus] =
+    useState<"todos" | "presentes" | "pendentes">("todos");
+
+  const [filtroSexo, setFiltroSexo] =
+    useState<"todos" | "homens" | "mulheres" | "indeterminados">("todos");
+
+  const [filtroListaAtivo, setFiltroListaAtivo] =
+    useState(false);
+
+  const [filtroListaId, setFiltroListaId] =
+    useState<number | null>(null);
+
+  const [ordenacaoParticipantes, setOrdenacaoParticipantes] =
+    useState<"cadastro_antigos" | "cadastro_recentes" | "nome_az" | "nome_za">("cadastro_recentes");
 
   const [acessoNegado, setAcessoNegado] =
     useState(false);
@@ -799,38 +834,65 @@ export default function EventoDashboard() {
 
   // FILTRO + BUSCA
 
-  const participantesFiltrados =
-    participantes.filter((p) => {
+  const participantesFiltrados = useMemo(() => {
+    const termoBusca = normalizarTextoBusca(busca);
 
-      const buscaMatch =
-        p.nome
-          ?.toLowerCase()
-          .includes(
-            busca.toLowerCase()
-          );
+    const filtrados = participantes.filter((participante) => {
+      const nome = normalizarTextoBusca(participante.nome);
+      const whatsapp = normalizarTextoBusca(participante.whatsapp);
+      const passaBusca = !termoBusca || nome.includes(termoBusca) || whatsapp.includes(termoBusca);
 
-      if (
-        filtro === "presentes"
-      ) {
-
-        return (
-          buscaMatch &&
-          p.presente
-        );
+      if (!passaBusca) {
+        return false;
       }
 
-      if (
-        filtro === "pendentes"
-      ) {
-
-        return (
-          buscaMatch &&
-          !p.presente
-        );
+      if (filtroStatus === "presentes" && !participante.presente) {
+        return false;
       }
 
-      return buscaMatch;
+      if (filtroStatus === "pendentes" && participante.presente) {
+        return false;
+      }
+
+      const sexo = sexoParticipanteFiltro(participante.sexo_estimado);
+
+      if (filtroSexo === "homens" && sexo !== "masculino") {
+        return false;
+      }
+
+      if (filtroSexo === "mulheres" && sexo !== "feminino") {
+        return false;
+      }
+
+      if (filtroSexo === "indeterminados" && sexo !== "indeterminado") {
+        return false;
+      }
+
+      if (filtroListaAtivo && filtroListaId !== null && Number(participante.lista_id) !== Number(filtroListaId)) {
+        return false;
+      }
+
+      return true;
     });
+
+    return filtrados.sort((a, b) => {
+      if (ordenacaoParticipantes === "cadastro_antigos") {
+        return Number(a.id) - Number(b.id);
+      }
+
+      if (ordenacaoParticipantes === "cadastro_recentes") {
+        return Number(b.id) - Number(a.id);
+      }
+
+      const nomeA = String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR", { sensitivity: "base" });
+
+      if (ordenacaoParticipantes === "nome_az") {
+        return nomeA;
+      }
+
+      return nomeA * -1;
+    });
+  }, [busca, filtroListaAtivo, filtroListaId, filtroSexo, filtroStatus, ordenacaoParticipantes, participantes]);
 
   function infoLista(participante: any) {
     const lista = listasEvento.find((item) => item.id === participante.lista_id);
@@ -844,74 +906,97 @@ export default function EventoDashboard() {
 
   // ANALÍTICOS
 
-  const totalConfirmados =
-    participantes.length;
+  const indicadoresParticipantes = useMemo(
+    () => calcularIndicadoresParticipantes(participantes),
+    [participantes]
+  );
 
-  const totalPresentes =
-    participantes.filter(
-      (p) => p.presente
-    ).length;
-
-  const totalPendentes =
-    totalConfirmados -
-    totalPresentes;
-
-  const porcentagemComparecimento =
-    totalConfirmados > 0
-      ? Math.round(
-          (
-            totalPresentes /
-            totalConfirmados
-          ) * 100
-        )
-      : 0;
-
-  // HORÁRIO MAIS QUENTE
-
-  const horarios: Record<
-    string,
-    number
-  > = {};
-
-  participantes.forEach((p) => {
-
-    if (
-      p.entrada_confirmada_em
-    ) {
-
-      const hora =
-        new Date(
-          p.entrada_confirmada_em
-        ).getHours();
-
-      const label =
-        `${hora}:00`;
-
-      horarios[label] =
-        (horarios[label] || 0)
-        + 1;
-    }
-  });
-
-  let horarioMaisQuente =
-    "-";
-
-  let maiorQuantidade = 0;
-
-  Object.entries(horarios)
-    .forEach(([hora, qtd]) => {
-
-      if (
-        qtd > maiorQuantidade
-      ) {
-
-        maiorQuantidade =
-          qtd;
-
-        horarioMaisQuente =
-          hora;
-      }
-    });
+  const cardsIndicadores = [
+    {
+      titulo: "👥 Total de inscritos",
+      valor: indicadoresParticipantes.totalInscritos,
+      valorClassName: "text-blue-900 sm:text-5xl",
+      cardClassName: "border-blue-100",
+    },
+    {
+      titulo: "Presentes",
+      valor: indicadoresParticipantes.totalPresentes,
+      valorClassName: "text-green-600 sm:text-5xl",
+      cardClassName: "border-green-200",
+    },
+    {
+      titulo: "Pendentes",
+      valor: indicadoresParticipantes.totalPendentes,
+      valorClassName: "text-amber-600 sm:text-5xl",
+      cardClassName: "border-amber-200",
+    },
+    {
+      titulo: "Comparecimento",
+      valor: `${indicadoresParticipantes.porcentagemComparecimento}%`,
+      valorClassName: "text-blue-500 sm:text-5xl",
+      cardClassName: "border-blue-100",
+    },
+    {
+      titulo: "Horário Mais Quente",
+      valor: `🔥 ${indicadoresParticipantes.horarioMaisQuente}`,
+      valorClassName: "text-orange-500 sm:text-4xl",
+      cardClassName: "border-orange-200",
+    },
+    {
+      titulo: "👨 Homens",
+      valor: indicadoresParticipantes.homens,
+      valorClassName: "text-sky-600 sm:text-5xl",
+      cardClassName: "border-sky-200",
+    },
+    {
+      titulo: "👩 Mulheres",
+      valor: indicadoresParticipantes.mulheres,
+      valorClassName: "text-pink-600 sm:text-5xl",
+      cardClassName: "border-pink-200",
+    },
+    {
+      titulo: "❓ Indeterminado",
+      valor: indicadoresParticipantes.indeterminado,
+      valorClassName: "text-slate-600 sm:text-5xl",
+      cardClassName: "border-slate-200",
+    },
+    {
+      titulo: "✅ Homens presentes",
+      valor: indicadoresParticipantes.homensPresentes,
+      valorClassName: "text-emerald-600 sm:text-5xl",
+      cardClassName: "border-emerald-200",
+    },
+    {
+      titulo: "✅ Mulheres presentes",
+      valor: indicadoresParticipantes.mulheresPresentes,
+      valorClassName: "text-teal-600 sm:text-5xl",
+      cardClassName: "border-teal-200",
+    },
+    {
+      titulo: "⏳ Homens pendentes",
+      valor: indicadoresParticipantes.homensPendentes,
+      valorClassName: "text-yellow-700 sm:text-5xl",
+      cardClassName: "border-yellow-200",
+    },
+    {
+      titulo: "⏳ Mulheres pendentes",
+      valor: indicadoresParticipantes.mulheresPendentes,
+      valorClassName: "text-orange-700 sm:text-5xl",
+      cardClassName: "border-orange-200",
+    },
+    {
+      titulo: "❓ Indeterminados presentes",
+      valor: indicadoresParticipantes.indeterminadosPresentes,
+      valorClassName: "text-violet-600 sm:text-5xl",
+      cardClassName: "border-violet-200",
+    },
+    {
+      titulo: "❓ Indeterminados pendentes",
+      valor: indicadoresParticipantes.indeterminadosPendentes,
+      valorClassName: "text-purple-700 sm:text-5xl",
+      cardClassName: "border-purple-200",
+    },
+  ];
 
   if (acessoNegado) {
     return (
@@ -1305,68 +1390,21 @@ export default function EventoDashboard() {
 
         {/* CARDS */}
 
-        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5 sm:gap-5">
+        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 sm:gap-5">
+          {cardsIndicadores.map((card) => (
+            <div
+              key={card.titulo}
+              className={`flex min-h-[168px] h-full flex-col items-center justify-center rounded-3xl border bg-white p-6 text-center shadow-sm ${card.cardClassName}`}
+            >
+              <p className="min-h-6 text-slate-500">
+                {card.titulo}
+              </p>
 
-          <div className="flex min-h-[168px] h-full flex-col items-center justify-center rounded-3xl border border-blue-100 bg-white p-6 text-center shadow-sm">
-
-            <p className="min-h-6 text-slate-500">
-              Total Confirmados
-            </p>
-
-            <h2 className="mt-3 text-4xl font-bold text-blue-900 sm:text-5xl">
-              {totalConfirmados}
-            </h2>
-
-          </div>
-
-          <div className="flex min-h-[168px] h-full flex-col items-center justify-center rounded-3xl border border-green-200 bg-white p-6 text-center shadow-sm">
-
-            <p className="min-h-6 text-slate-500">
-              Presentes
-            </p>
-
-            <h2 className="mt-3 text-4xl font-bold text-green-600 sm:text-5xl">
-              {totalPresentes}
-            </h2>
-
-          </div>
-
-          <div className="flex min-h-[168px] h-full flex-col items-center justify-center rounded-3xl border border-amber-200 bg-white p-6 text-center shadow-sm">
-
-            <p className="min-h-6 text-slate-500">
-              Pendentes
-            </p>
-
-            <h2 className="mt-3 text-4xl font-bold text-amber-600 sm:text-5xl">
-              {totalPendentes}
-            </h2>
-
-          </div>
-
-          <div className="flex min-h-[168px] h-full flex-col items-center justify-center rounded-3xl border border-blue-100 bg-white p-6 text-center shadow-sm">
-
-            <p className="min-h-6 text-slate-500">
-              Comparecimento
-            </p>
-
-            <h2 className="mt-3 text-4xl font-bold text-blue-500 sm:text-5xl">
-              {porcentagemComparecimento}%
-            </h2>
-
-          </div>
-
-          <div className="flex min-h-[168px] h-full flex-col items-center justify-center rounded-3xl border border-orange-200 bg-white p-6 text-center shadow-sm">
-
-            <p className="min-h-6 text-slate-500">
-              Horário Mais Quente
-            </p>
-
-            <h2 className="mt-3 text-3xl font-bold text-orange-500 sm:text-4xl">
-              🔥 {horarioMaisQuente}
-            </h2>
-
-          </div>
-
+              <h2 className={`mt-3 text-4xl font-bold ${card.valorClassName}`}>
+                {card.valor}
+              </h2>
+            </div>
+          ))}
         </div>
 
         {/* EXPORTAÇÃO */}
@@ -1426,7 +1464,7 @@ export default function EventoDashboard() {
 
             <input
               type="text"
-              placeholder="Buscar participante..."
+              placeholder="Buscar por nome, sobrenome ou WhatsApp"
               value={busca}
               onChange={(e) =>
                 setBusca(
@@ -1435,6 +1473,24 @@ export default function EventoDashboard() {
               }
               className="ui-field text-base md:max-w-md"
             />
+          </div>
+
+          <div className="mt-4 md:max-w-md">
+            <label className="mb-2 block text-sm font-semibold text-blue-900">Ordenar por</label>
+            <select
+              value={ordenacaoParticipantes}
+              onChange={(e) =>
+                setOrdenacaoParticipantes(
+                  e.target.value as "cadastro_antigos" | "cadastro_recentes" | "nome_az" | "nome_za"
+                )
+              }
+              className="ui-field"
+            >
+              <option value="cadastro_antigos">Ordem de cadastro (Mais antigos)</option>
+              <option value="cadastro_recentes">Ordem de cadastro (Mais recentes)</option>
+              <option value="nome_az">Nome A → Z</option>
+              <option value="nome_za">Nome Z → A</option>
+            </select>
           </div>
         </div>
 
@@ -1452,42 +1508,107 @@ export default function EventoDashboard() {
 
         {/* FILTROS */}
 
-        <div className="flex gap-3 mb-6 flex-wrap">
+        <div className="flex gap-3 mb-4 flex-wrap">
 
           <button
-            onClick={() =>
-              setFiltro("todos")
-            }
+            onClick={() => {
+              setFiltroStatus("todos");
+              setFiltroSexo("todos");
+              setFiltroListaAtivo(false);
+              setFiltroListaId(null);
+            }}
             className={`ui-toggle-btn px-4 sm:px-5 py-3 rounded-xl font-bold transition min-h-11 ${
-              filtro === "todos" ? "ui-toggle-btn-active" : ""
+              filtroStatus === "todos" && filtroSexo === "todos" && !filtroListaAtivo ? "ui-toggle-btn-active" : ""
             }`}
           >
             Todos
           </button>
 
           <button
-            onClick={() =>
-              setFiltro("presentes")
-            }
+            onClick={() => setFiltroStatus("presentes")}
             className={`ui-toggle-btn px-4 sm:px-5 py-3 rounded-xl font-bold transition min-h-11 ${
-              filtro === "presentes" ? "ui-toggle-btn-active" : ""
+              filtroStatus === "presentes" ? "ui-toggle-btn-active" : ""
             }`}
           >
             Presentes
           </button>
 
           <button
-            onClick={() =>
-              setFiltro("pendentes")
-            }
+            onClick={() => setFiltroStatus("pendentes")}
             className={`ui-toggle-btn px-4 sm:px-5 py-3 rounded-xl font-bold transition min-h-11 ${
-              filtro === "pendentes" ? "ui-toggle-btn-active" : ""
+              filtroStatus === "pendentes" ? "ui-toggle-btn-active" : ""
             }`}
           >
             Pendentes
           </button>
 
+          <button
+            onClick={() => setFiltroSexo("homens")}
+            className={`ui-toggle-btn px-4 sm:px-5 py-3 rounded-xl font-bold transition min-h-11 ${
+              filtroSexo === "homens" ? "ui-toggle-btn-active" : ""
+            }`}
+          >
+            Homens
+          </button>
+
+          <button
+            onClick={() => setFiltroSexo("mulheres")}
+            className={`ui-toggle-btn px-4 sm:px-5 py-3 rounded-xl font-bold transition min-h-11 ${
+              filtroSexo === "mulheres" ? "ui-toggle-btn-active" : ""
+            }`}
+          >
+            Mulheres
+          </button>
+
+          <button
+            onClick={() => setFiltroSexo("indeterminados")}
+            className={`ui-toggle-btn px-4 sm:px-5 py-3 rounded-xl font-bold transition min-h-11 ${
+              filtroSexo === "indeterminados" ? "ui-toggle-btn-active" : ""
+            }`}
+          >
+            Indeterminados
+          </button>
+
+          <button
+            onClick={() => {
+              const proximoAtivo = !filtroListaAtivo;
+              setFiltroListaAtivo(proximoAtivo);
+
+              if (!proximoAtivo) {
+                setFiltroListaId(null);
+                return;
+              }
+
+              if (filtroListaId === null && listasEvento.length > 0) {
+                setFiltroListaId(listasEvento[0].id);
+              }
+            }}
+            className={`ui-toggle-btn px-4 sm:px-5 py-3 rounded-xl font-bold transition min-h-11 ${
+              filtroListaAtivo ? "ui-toggle-btn-active" : ""
+            }`}
+          >
+            Por Lista
+          </button>
+
         </div>
+
+        {filtroListaAtivo ? (
+          <div className="mb-6 max-w-md">
+            <label className="mb-2 block text-sm font-semibold text-blue-900">Selecionar Lista</label>
+            <select
+              value={filtroListaId ?? ""}
+              onChange={(e) => setFiltroListaId(e.target.value ? Number(e.target.value) : null)}
+              className="ui-field"
+            >
+              {listasEvento.length === 0 ? <option value="">Sem listas</option> : null}
+              {listasEvento.map((lista) => (
+                <option key={lista.id} value={lista.id}>
+                  {lista.nome}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
 
         {/* CHECK-IN MOBILE */}
 

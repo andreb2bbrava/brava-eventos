@@ -63,6 +63,11 @@ const MENU_ITEMS: MenuItem[] = [
     roles: ["platform_owner"],
   },
   {
+    label: "🧠 Inteligência",
+    href: "/admin/inteligencia",
+    roles: ["platform_owner", "super_admin", "produtor"],
+  },
+  {
     label: "Relatorios",
     disabled: true,
     roles: ["platform_owner", "super_admin", "produtor"],

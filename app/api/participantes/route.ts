@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { registrarAuditLog } from "@/lib/auditoria";
+import { classificarParticipante } from "@/lib/inteligencia";
 import { canEditEventRole, isAdminRole, isRoleUsuario, type RoleUsuario } from "@/lib/roles";
 import { erroEhDuplicidadeParticipante, normalizarNomeParticipante } from "@/lib/participantes";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -139,6 +140,7 @@ export async function POST(request: Request) {
       }
 
       const nomeNormalizado = normalizarNomeParticipante(nome);
+      const classificacao = classificarParticipante(nome);
 
       const { data: novoParticipante, error } = await supabaseAdmin
         .from("participantes")
@@ -150,6 +152,12 @@ export async function POST(request: Request) {
             nome_normalizado: nomeNormalizado,
             whatsapp: whatsapp || null,
             email: email || null,
+            sexo_estimado: classificacao.sexoEstimado,
+            confianca_sexo: classificacao.confiancaSexo,
+            metodo_classificacao: classificacao.metodoClassificacao,
+            motor_inteligencia: classificacao.motorInteligencia,
+            versao_motor: classificacao.versaoMotor,
+            classificado_em: classificacao.classificadoEm,
             presente: false,
           },
         ])
@@ -192,7 +200,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Informe ao menos um nome para importacao." }, { status: 400 });
     }
 
-    const payload: Array<{ evento_id: number; lista_id: number; nome: string; nome_normalizado: string; presente: boolean }> = [];
+    const payload: Array<{
+      evento_id: number;
+      lista_id: number;
+      nome: string;
+      nome_normalizado: string;
+      sexo_estimado: string;
+      confianca_sexo: number;
+      metodo_classificacao: string;
+      motor_inteligencia: string;
+      versao_motor: string;
+      classificado_em: string;
+      presente: boolean;
+    }> = [];
 
     for (const nome of nomes) {
       const nomeNormalizado = normalizarNomeParticipante(nome);
@@ -200,11 +220,19 @@ export async function POST(request: Request) {
         continue;
       }
 
+      const classificacao = classificarParticipante(nome);
+
       payload.push({
         evento_id: eventoId,
         lista_id: listaId,
         nome,
         nome_normalizado: nomeNormalizado,
+        sexo_estimado: classificacao.sexoEstimado,
+        confianca_sexo: classificacao.confiancaSexo,
+        metodo_classificacao: classificacao.metodoClassificacao,
+        motor_inteligencia: classificacao.motorInteligencia,
+        versao_motor: classificacao.versaoMotor,
+        classificado_em: classificacao.classificadoEm,
         presente: false,
       });
     }
