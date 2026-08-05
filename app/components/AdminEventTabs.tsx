@@ -4,7 +4,7 @@ import Link from "next/link";
 
 type AdminEventTabsProps = {
   slug: string;
-  current: "visao-geral" | "listas" | "convidados" | "check-in" | "configuracoes";
+  current: "visao-geral" | "listas" | "convidados" | "check-in" | "configuracoes" | "equipe";
 };
 
 type TabItem = {
@@ -20,7 +20,7 @@ export default function AdminEventTabs({ slug, current }: AdminEventTabsProps) {
     { key: "convidados", label: "Convidados", href: `/admin/eventos/${slug}#convidados` },
     { key: "check-in", label: "Check-in", href: `/admin/eventos/${slug}#check-in` },
     { key: "configuracoes", label: "Configurações", href: `/admin/eventos/${slug}/editar#configuracoes-evento` },
-    { key: "equipe", label: "Equipe" },
+    { key: "equipe", label: "Equipe", href: `/admin/eventos/${slug}/equipe` },
     { key: "marketing", label: "Marketing" },
     { key: "relatorios", label: "Relatorios" },
   ];

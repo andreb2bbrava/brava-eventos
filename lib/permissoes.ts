@@ -1,73 +1,54 @@
 import { supabase } from "@/lib/supabase";
-import { canCheckinRole, canEditEventRole, isAdminRole, isRoleUsuario, type RoleUsuario } from "@/lib/roles";
+import { canCheckinRole, canEditEventRole, resolverRoleUsuario, type RoleUsuario } from "@/lib/roles";
 
-export async function podeAcessarEvento(slug: string) {
+type ResultadoAcessoEvento = {
+  autorizado: boolean;
+  evento: any | null;
+  erro: string | null;
+  role: RoleUsuario | null;
+};
+
+export async function podeAcessarEvento(slug: string): Promise<ResultadoAcessoEvento> {
   const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
 
-  if (userError || !user) {
+  if (sessionError || !session?.access_token) {
     return { autorizado: false, evento: null, erro: "Usuário não autenticado.", role: null };
   }
 
-  const { data: usuarioData, error: usuarioError } = await supabase
-    .from("usuarios")
-    .select("role")
-    .eq("id", user.id)
-    .single();
+  const response = await fetch(`/api/admin/evento-acesso?slug=${encodeURIComponent(slug)}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+    },
+  });
 
-  if (usuarioError || !usuarioData) {
-    return { autorizado: false, evento: null, erro: "Usuário não encontrado.", role: null };
+  const result = (await response.json()) as {
+    autorizado?: boolean;
+    evento?: unknown;
+    erro?: string | null;
+    role?: string | null;
+  };
+
+  const role = resolverRoleUsuario(result?.role || null);
+
+  if (!response.ok || !result?.autorizado || !result?.evento) {
+    return {
+      autorizado: false,
+      evento: null,
+      erro: result?.erro || "Você não possui permissão para acessar este evento.",
+      role,
+    };
   }
 
-  const role = isRoleUsuario(usuarioData.role) ? usuarioData.role : null;
-
-  const { data: evento, error: eventoError } = await supabase
-    .from("eventos")
-    .select("*")
-    .eq("slug", slug)
-    .single();
-
-  if (eventoError || !evento) {
-    return { autorizado: false, evento: null, erro: "Evento não encontrado.", role };
-  }
-
-  if (isAdminRole(role)) {
-    return { autorizado: true, evento, erro: null, role };
-  }
-
-  if (role === "staff") {
-    const { data: vinculacao, error: vinculacaoError } = await supabase
-      .from("evento_staff")
-      .select("id")
-      .eq("evento_id", evento.id)
-      .eq("usuario_id", user.id)
-      .maybeSingle();
-
-    if (vinculacaoError || !vinculacao) {
-      return { autorizado: false, evento: null, erro: "Você não possui permissão para acessar este evento.", role };
-    }
-
-    return { autorizado: true, evento, erro: null, role };
-  }
-
-  if (role !== "produtor") {
-    return { autorizado: false, evento: null, erro: "Você não possui permissão para acessar este evento.", role };
-  }
-
-  const { data: vinculacao, error: vinculacaoError } = await supabase
-    .from("evento_produtores")
-    .select("id")
-    .eq("evento_id", evento.id)
-    .eq("usuario_id", user.id)
-    .maybeSingle();
-
-  if (vinculacaoError || !vinculacao) {
-    return { autorizado: false, evento: null, erro: "Você não possui permissão para acessar este evento.", role };
-  }
-
-  return { autorizado: true, evento, erro: null, role };
+  return {
+    autorizado: true,
+    evento: result.evento as any,
+    erro: null,
+    role,
+  };
 }
 
 export async function podeEditarEvento(slug: string) {

@@ -50,7 +50,12 @@ const MENU_ITEMS: MenuItem[] = [
   {
     label: "Meus Eventos",
     href: "/admin#todos-eventos",
-    roles: ["platform_owner", "super_admin", "produtor", "staff"],
+    roles: ["produtor", "staff"],
+  },
+  {
+    label: "Todos os Eventos",
+    href: "/admin/todos-eventos",
+    roles: ["platform_owner", "super_admin"],
   },
   {
     label: "Minha Equipe",
@@ -90,6 +95,10 @@ function itemAtivo(pathname: string, href?: string) {
 
   if (href.startsWith("/admin#todos-eventos")) {
     return pathname.startsWith("/admin/eventos") || pathname === "/admin" || pathname === "/admin/criar-evento";
+  }
+
+  if (href === "/admin/todos-eventos") {
+    return pathname === "/admin/todos-eventos" || pathname.startsWith("/admin/eventos");
   }
 
   return pathname === href || pathname.startsWith(`${href}/`);

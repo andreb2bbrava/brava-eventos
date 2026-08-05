@@ -13,7 +13,7 @@ import {
   normalizarNomeParticipante,
   validarNomeCompletoParticipante,
 } from "@/lib/participantes";
-import { canEditEventRole, canCheckinRole, isAdminRole, type RoleUsuario } from "@/lib/roles";
+import { canEditEventRole, canCheckinRole, isAdminRole, resolverRoleUsuario, type RoleUsuario } from "@/lib/roles";
 
 type EventoResumo = {
   id: number;
@@ -239,7 +239,7 @@ export default function ParticipantesDaListaPage() {
     const usuario = usuarioData;
     debugLog("ROLE", usuario?.role);
 
-    const role = (usuarioData?.role as RoleUsuario | null) ?? null;
+    const role = resolverRoleUsuario(usuarioData?.role || null);
     setRoleUsuario(role);
 
     if (usuarioError || !role) {

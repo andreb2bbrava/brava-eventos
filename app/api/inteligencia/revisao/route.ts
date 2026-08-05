@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { canEditEventRole, isAdminRole, isRoleUsuario, type RoleUsuario } from "@/lib/roles";
+import { canEditEventRole, isAdminRole, resolverRoleUsuario, type RoleUsuario } from "@/lib/roles";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 type UsuarioAutenticado = {
@@ -78,9 +78,9 @@ async function autenticarUsuario(request: Request): Promise<{ ok: true; usuario:
     .eq("id", authData.user.id)
     .single();
 
-  const role = usuarioData?.role as RoleUsuario | undefined;
+  const role = resolverRoleUsuario(usuarioData?.role);
 
-  if (usuarioError || !usuarioData?.id || !role || !isRoleUsuario(role)) {
+  if (usuarioError || !usuarioData?.id || !role) {
     return { ok: false, response: NextResponse.json({ error: "Usuario sem permissao." }, { status: 403 }) };
   }
 

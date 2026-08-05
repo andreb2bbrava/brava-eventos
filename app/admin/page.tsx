@@ -8,7 +8,7 @@ import AdminShell from "@/app/components/AdminShell";
 import DeleteEventButton from "@/app/components/DeleteEventButton";
 import { gerarSlugUnicoEvento } from "@/lib/slug";
 import { primeiroNome, resolverNomeExibicaoUsuario } from "@/lib/usuarios";
-import { canEditEventRole, isAdminRole, roleLabel, type RoleUsuario } from "@/lib/roles";
+import { canEditEventRole, isAdminRole, resolverRoleUsuario, roleLabel, type RoleUsuario } from "@/lib/roles";
 
 type Evento = {
   id: number;
@@ -380,7 +380,23 @@ export default function AdminPage() {
       return;
     }
 
-    const role = usuarioData.role as RoleUsuario;
+    const role = resolverRoleUsuario(usuarioData.role);
+
+    if (!role) {
+      setRoleUsuario(null);
+      setEventosAtivos([]);
+      setEventosHistorico([]);
+      setResumo({
+        eventosFuturos: 0,
+        usuarios: null,
+        listas: 0,
+        participantes: 0,
+        checkins: 0,
+      });
+      setLoading(false);
+      return;
+    }
+
     setRoleUsuario(role);
 
     let eventosAcessiveis: Evento[] = [];
