@@ -361,6 +361,7 @@ export async function POST(request: Request) {
     const equipe = await montarPayloadEquipe(Number(evento.id));
 
     return NextResponse.json({
+      evento,
       role: auth.usuario.role,
       podeGerenciarProdutores: podeGerenciarProdutores(auth.usuario.role),
       podeGerenciarStaff: podeGerenciarStaff(auth.usuario.role),
@@ -450,6 +451,7 @@ export async function DELETE(request: Request) {
     const equipe = await montarPayloadEquipe(Number(evento.id));
 
     return NextResponse.json({
+      evento,
       role: auth.usuario.role,
       podeGerenciarProdutores: podeGerenciarProdutores(auth.usuario.role),
       podeGerenciarStaff: podeGerenciarStaff(auth.usuario.role),

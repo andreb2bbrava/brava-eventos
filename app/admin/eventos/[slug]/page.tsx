@@ -997,6 +997,50 @@ export default function EventoDashboard() {
       cardClassName: "border-purple-200",
     },
   ];
+  const totalClassificados =
+  indicadoresParticipantes.homens +
+  indicadoresParticipantes.mulheres +
+  indicadoresParticipantes.indeterminado;
+
+const percentualHomens =
+  totalClassificados > 0
+    ? Math.round((indicadoresParticipantes.homens / totalClassificados) * 100)
+    : 0;
+
+const percentualMulheres =
+  totalClassificados > 0
+    ? Math.round((indicadoresParticipantes.mulheres / totalClassificados) * 100)
+    : 0;
+
+const percentualIndeterminado =
+  totalClassificados > 0
+    ? Math.max(0, 100 - percentualHomens - percentualMulheres)
+    : 0;
+
+const desempenhoListas = listasEvento
+  .map((lista) => {
+    const participantesLista = participantes.filter(
+      (participante) => Number(participante.lista_id) === Number(lista.id)
+    );
+
+    const inscritos = participantesLista.length;
+    const presentes = participantesLista.filter(
+      (participante) => participante.presente
+    ).length;
+
+    const comparecimento =
+      inscritos > 0 ? Math.round((presentes / inscritos) * 100) : 0;
+
+    return {
+      id: lista.id,
+      nome: lista.nome,
+      inscritos,
+      presentes,
+      comparecimento,
+      ativa: lista.ativa,
+    };
+  })
+  .sort((a, b) => b.inscritos - a.inscritos);
 
   if (acessoNegado) {
     return (
@@ -1306,106 +1350,767 @@ export default function EventoDashboard() {
           </p>
         ) : null}
 
-        <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {listasEvento.length === 0 ? (
-            <p className="text-sm text-slate-500">Nenhuma lista criada para este evento.</p>
-          ) : (
-            listasEvento.map((lista) => (
-              <article key={lista.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                {(() => {
-                  const visibilidade = (lista.tipo_visibilidade || lista.visibilidade || "privada").toLowerCase();
-                  const listaPublica = visibilidadeEhPublica(lista.tipo_visibilidade || lista.visibilidade);
-                  const listaPublicaAtivaComSlug = listaPublica && !!lista.ativa && !!lista.slug;
+<div className="mt-5">
 
-                  return (
-                    <>
-                <h3 className="text-base font-bold text-blue-900 break-words">{lista.nome}</h3>
-                <p className="mt-1 text-sm text-slate-500">Tipo: {rotuloTipoLista(lista.tipo_lista ?? null)}</p>
-                <p className="mt-1 text-sm text-slate-500">Visibilidade: {rotuloVisibilidadeLista(lista)}</p>
-                <p className="mt-1 text-sm text-slate-500">Regra: {lista.regra || "-"}</p>
-                <p className="mt-1 text-sm text-slate-500">Status: {lista.ativa ? "Ativa" : "Inativa"}</p>
-                {(canEditEventRole(roleUsuario)) && sanitizeMetaPixelId(lista.meta_pixel_id) ? (
-                  <p className="mt-1 text-sm font-semibold text-blue-700">Meta Pixel configurado</p>
-                ) : null}
+  {/* DESKTOP */}
 
-                <div className="mt-2">
-                  {listaPublicaAtivaComSlug ? (
-                    <CopyLinkButton
-                      link={() => `${window.location.origin}/evento/${evento.slug}/${lista.slug}`}
-                      idleLabel="Copiar Link Público"
-                      copiedLabel="Copiado ✓"
-                      className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-100 px-4 py-2 text-sm font-bold text-emerald-800 transition hover:bg-emerald-200"
-                    />
-                  ) : listaPublica && !!lista.ativa && !lista.slug ? (
-                    <p className="text-sm font-semibold text-amber-700">Esta lista ainda não possui link público.</p>
-                  ) : !listaPublica ? (
-                    <span className="inline-flex rounded-xl bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-slate-600">
-                      Lista privada
-                    </span>
-                  ) : (
-                    <span className="inline-flex rounded-xl bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-slate-600">
-                      Lista inativa
-                    </span>
-                  )}
-                </div>
+  <div className="hidden lg:block overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
 
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Link
-                    href={`/admin/eventos/${evento.slug}/listas/${lista.id}`}
-                    className="inline-flex min-h-10 items-center justify-center rounded-xl bg-green-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-green-400"
+    <table className="w-full table-fixed">
+
+      <colgroup>
+  <col className="w-[32%]" />
+  <col className="w-[11%]" />
+  <col className="w-[10%]" />
+  <col className="w-[10%]" />
+  <col className="w-[11%]" />
+  <col className="w-[26%]" />
+</colgroup>
+
+      <thead className="bg-slate-50">
+        <tr className="border-b border-slate-200">
+          <th className="px-5 py-4 text-left text-xs font-extrabold uppercase tracking-wider text-slate-400">
+            Lista
+          </th>
+
+          <th className="px-4 py-4 text-center text-xs font-extrabold uppercase tracking-wider text-slate-400">
+            Tipo
+          </th>
+
+          <th className="px-4 py-4 text-center text-xs font-extrabold uppercase tracking-wider text-slate-400">
+            Inscritos
+          </th>
+
+          <th className="px-4 py-4 text-center text-xs font-extrabold uppercase tracking-wider text-slate-400">
+            Presentes
+          </th>
+
+          <th className="px-4 py-4 text-center text-xs font-extrabold uppercase tracking-wider text-slate-400">
+            Status
+          </th>
+
+          <th className="px-5 py-4 text-right text-xs font-extrabold uppercase tracking-wider text-slate-400">
+            Ações
+          </th>
+        </tr>
+      </thead>
+
+      <tbody>
+
+        {listasEvento.length === 0 ? (
+
+          <tr>
+            <td colSpan={6} className="px-5 py-10 text-center text-sm text-slate-500">
+              Nenhuma lista criada para este evento.
+            </td>
+          </tr>
+
+        ) : (
+
+          listasEvento.map((lista) => {
+
+            const desempenho = desempenhoListas.find(
+              (item) => item.id === lista.id
+            );
+
+            const listaPublica =
+              visibilidadeEhPublica(
+                lista.tipo_visibilidade || lista.visibilidade
+              );
+
+            const listaPublicaAtivaComSlug =
+              listaPublica && !!lista.ativa && !!lista.slug;
+
+            return (
+
+              <tr
+                key={lista.id}
+                className="border-b border-slate-100 last:border-0 transition hover:bg-slate-50/70"
+              >
+
+                {/* LISTA */}
+
+                <td className="px-5 py-4 align-top">
+
+                  <div className="flex items-start gap-3">
+
+                    <div className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-sm">
+                      📋
+                    </div>
+
+                    <div className="min-w-0">
+
+                      <p className="break-words font-extrabold text-blue-950">
+                        {lista.nome}
+                      </p>
+
+                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
+                        {(lista.regra || "").trim()
+                          ? lista.regra
+                          : "Sem regra definida"}
+                      </p>
+
+                      <div className="mt-2 flex flex-wrap gap-2">
+
+                        <span
+                          className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                            listaPublica
+                              ? "bg-emerald-50 text-emerald-700"
+                              : "bg-slate-100 text-slate-600"
+                          }`}
+                        >
+                          {listaPublica ? "Pública" : "Privada"}
+                        </span>
+
+                        {(canEditEventRole(roleUsuario)) &&
+                        sanitizeMetaPixelId(lista.meta_pixel_id) ? (
+                          <span className="inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-700">
+                            Pixel ativo
+                          </span>
+                        ) : null}
+
+                      </div>
+
+                    </div>
+
+                  </div>
+
+                </td>
+
+                {/* TIPO */}
+
+                <td className="px-4 py-4 text-center align-middle">
+                  <span className="text-sm font-semibold text-slate-600">
+                    {rotuloTipoLista(lista.tipo_lista ?? null)}
+                  </span>
+                </td>
+
+                {/* INSCRITOS */}
+
+                <td className="px-4 py-4 text-center align-middle">
+                  <span className="text-lg font-black text-blue-700">
+                    {desempenho?.inscritos ?? 0}
+                  </span>
+                </td>
+
+                {/* PRESENTES */}
+
+                <td className="px-4 py-4 text-center align-middle">
+                  <span className="text-lg font-black text-emerald-600">
+                    {desempenho?.presentes ?? 0}
+                  </span>
+                </td>
+
+                {/* STATUS */}
+
+                <td className="px-4 py-4 text-center align-middle">
+
+                  <span
+                    className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold ${
+                      lista.ativa
+                        ? "bg-green-50 text-green-700"
+                        : "bg-slate-100 text-slate-500"
+                    }`}
                   >
-                    Abrir Lista
-                  </Link>
+                    <span
+                      className={`h-2 w-2 rounded-full ${
+                        lista.ativa
+                          ? "bg-green-500"
+                          : "bg-slate-400"
+                      }`}
+                    />
 
-                  {(canEditEventRole(roleUsuario)) ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => abrirEdicaoLista(lista)}
-                        className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-100 px-4 py-2 text-sm font-bold text-blue-900 transition hover:bg-blue-200"
-                      >
-                        Editar Lista
-                      </button>
+                    {lista.ativa ? "Ativa" : "Inativa"}
 
-                      <button
-                        type="button"
-                        onClick={() => void excluirListaCentral(lista.id)}
-                        className="inline-flex min-h-10 items-center justify-center rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-400"
-                      >
-                        Excluir Lista
-                      </button>
-                    </>
-                  ) : null}
-                </div>
-                    </>
-                  );
-                })()}
-              </article>
-            ))
-          )}
-        </div>
-      </section>
+                  </span>
 
-      <section className="p-4 sm:p-6" id="check-in">
+                </td>
 
-        {/* CARDS */}
+                {/* AÇÕES */}
 
-        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 sm:gap-5">
-          {cardsIndicadores.map((card) => (
-            <div
-              key={card.titulo}
-              className={`flex min-h-[168px] h-full flex-col items-center justify-center rounded-3xl border bg-white p-6 text-center shadow-sm ${card.cardClassName}`}
-            >
-              <p className="min-h-6 text-slate-500">
-                {card.titulo}
-              </p>
+                <td className="px-5 py-4 align-middle">
 
-              <h2 className={`mt-3 text-4xl font-bold ${card.valorClassName}`}>
-                {card.valor}
-              </h2>
+                  <div className="flex items-center justify-end gap-2 whitespace-nowrap">
+
+                    <Link
+                      href={`/admin/eventos/${evento.slug}/listas/${lista.id}`}
+                      className="inline-flex h-9 items-center justify-center rounded-lg bg-blue-700 px-3.5 text-xs font-extrabold text-white transition hover:bg-blue-600"
+                    >
+                      Abrir
+                    </Link>
+
+                    {(canEditEventRole(roleUsuario)) ? (
+
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => abrirEdicaoLista(lista)}
+                          className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+                        >
+                          Editar
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => void excluirListaCentral(lista.id)}
+                          className="inline-flex h-9 items-center justify-center rounded-lg border border-red-100 bg-red-50 px-3.5 text-xs font-bold text-red-600 transition hover:bg-red-100"
+                        >
+                          Excluir
+                        </button>
+                      </>
+
+                    ) : null}
+
+                    {listaPublicaAtivaComSlug ? (
+
+                      <CopyLinkButton
+                        link={() =>
+                          `${window.location.origin}/evento/${evento.slug}/${lista.slug}`
+                        }
+                        idleLabel="Link"
+                        copiedLabel="Copiado ✓"
+                        className="inline-flex h-9 items-center justify-center rounded-lg border border-emerald-100 bg-emerald-50 px-3.5 text-xs font-bold text-emerald-700 transition hover:bg-emerald-100"
+                      />
+
+                    ) : null}
+
+                  </div>
+
+                </td>
+
+              </tr>
+
+            );
+
+          })
+
+        )}
+
+      </tbody>
+
+    </table>
+
+  </div>
+
+  {/* MOBILE / TABLET */}
+
+  <div className="space-y-3 lg:hidden">
+
+    {listasEvento.length === 0 ? (
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
+        Nenhuma lista criada para este evento.
+      </div>
+
+    ) : (
+
+      listasEvento.map((lista) => {
+
+        const desempenho = desempenhoListas.find(
+          (item) => item.id === lista.id
+        );
+
+        const listaPublica =
+          visibilidadeEhPublica(
+            lista.tipo_visibilidade || lista.visibilidade
+          );
+
+        const listaPublicaAtivaComSlug =
+          listaPublica && !!lista.ativa && !!lista.slug;
+
+        return (
+
+          <article
+            key={lista.id}
+            className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+          >
+
+            <div className="flex items-start justify-between gap-3">
+
+              <div className="min-w-0">
+
+                <p className="break-words font-extrabold text-blue-950">
+                  {lista.nome}
+                </p>
+
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  {(lista.regra || "").trim()
+                    ? lista.regra
+                    : "Sem regra definida"}
+                </p>
+
+              </div>
+
+              <span
+                className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${
+                  lista.ativa
+                    ? "bg-green-50 text-green-700"
+                    : "bg-slate-100 text-slate-500"
+                }`}
+              >
+                {lista.ativa ? "Ativa" : "Inativa"}
+              </span>
+
             </div>
-          ))}
+
+            <div className="mt-4 grid grid-cols-3 gap-2">
+
+              <div className="rounded-xl bg-blue-50 p-3 text-center">
+                <p className="text-[11px] font-bold uppercase text-blue-500">
+                  Inscritos
+                </p>
+
+                <p className="mt-1 text-xl font-black text-blue-700">
+                  {desempenho?.inscritos ?? 0}
+                </p>
+              </div>
+
+              <div className="rounded-xl bg-emerald-50 p-3 text-center">
+                <p className="text-[11px] font-bold uppercase text-emerald-600">
+                  Presentes
+                </p>
+
+                <p className="mt-1 text-xl font-black text-emerald-700">
+                  {desempenho?.presentes ?? 0}
+                </p>
+              </div>
+
+              <div className="rounded-xl bg-slate-50 p-3 text-center">
+                <p className="text-[11px] font-bold uppercase text-slate-500">
+                  Presença
+                </p>
+
+                <p className="mt-1 text-xl font-black text-slate-700">
+                  {desempenho?.comparecimento ?? 0}%
+                </p>
+              </div>
+
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+
+              <Link
+                href={`/admin/eventos/${evento.slug}/listas/${lista.id}`}
+                className="inline-flex min-h-10 flex-1 items-center justify-center rounded-xl bg-blue-700 px-4 py-2 text-sm font-extrabold text-white"
+              >
+                Abrir lista
+              </Link>
+
+              {(canEditEventRole(roleUsuario)) ? (
+
+                <button
+                  type="button"
+                  onClick={() => abrirEdicaoLista(lista)}
+                  className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700"
+                >
+                  Editar
+                </button>
+
+              ) : null}
+
+              {listaPublicaAtivaComSlug ? (
+
+                <CopyLinkButton
+                  link={() =>
+                    `${window.location.origin}/evento/${evento.slug}/${lista.slug}`
+                  }
+                  idleLabel="Copiar link"
+                  copiedLabel="Copiado ✓"
+                  className="inline-flex min-h-10 items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700"
+                />
+
+              ) : null}
+
+              {(canEditEventRole(roleUsuario)) ? (
+
+                <button
+                  type="button"
+                  onClick={() => void excluirListaCentral(lista.id)}
+                  className="inline-flex min-h-10 items-center justify-center rounded-xl border border-red-100 bg-red-50 px-4 py-2 text-sm font-bold text-red-600"
+                >
+                  Excluir
+                </button>
+
+              ) : null}
+
+            </div>
+
+          </article>
+
+        );
+
+      })
+
+    )}
+
+  </div>
+
+</div>
+
+       {/* DASHBOARD BI */}
+
+<div className="mb-8 space-y-5">
+
+  <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+    <div>
+      <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-blue-600">
+        Inteligência do Evento
+      </p>
+
+      <h2 className="mt-1 text-2xl font-black text-blue-950">
+        Visão geral da operação
+      </h2>
+
+      <p className="mt-1 text-sm text-slate-500">
+        Acompanhe inscrições, presença e comportamento do público em tempo real.
+      </p>
+    </div>
+
+    <div className="inline-flex w-fit items-center gap-2 rounded-full border border-green-200 bg-green-50 px-3 py-2 text-xs font-bold text-green-700">
+      <span className="h-2 w-2 rounded-full bg-green-500" />
+      Dados atualizados
+    </div>
+  </div>
+
+  {/* KPIs PRINCIPAIS */}
+
+  <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+
+    <div className="rounded-2xl border border-blue-100 bg-white p-4 shadow-sm sm:p-5">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-slate-500">
+          Total de inscritos
+        </p>
+
+        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-lg">
+          👥
+        </span>
+      </div>
+
+      <p className="mt-3 text-3xl font-black text-blue-950 sm:text-4xl">
+        {indicadoresParticipantes.totalInscritos}
+      </p>
+
+      <p className="mt-1 text-xs text-slate-400">
+        participantes cadastrados
+      </p>
+    </div>
+
+    <div className="rounded-2xl border border-green-200 bg-white p-4 shadow-sm sm:p-5">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-slate-500">
+          Presentes
+        </p>
+
+        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-green-50 text-lg">
+          ✓
+        </span>
+      </div>
+
+      <p className="mt-3 text-3xl font-black text-green-600 sm:text-4xl">
+        {indicadoresParticipantes.totalPresentes}
+      </p>
+
+      <p className="mt-1 text-xs text-slate-400">
+        check-ins realizados
+      </p>
+    </div>
+
+    <div className="rounded-2xl border border-amber-200 bg-white p-4 shadow-sm sm:p-5">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-slate-500">
+          Pendentes
+        </p>
+
+        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 text-lg">
+          ⏳
+        </span>
+      </div>
+
+      <p className="mt-3 text-3xl font-black text-amber-600 sm:text-4xl">
+        {indicadoresParticipantes.totalPendentes}
+      </p>
+
+      <p className="mt-1 text-xs text-slate-400">
+        ainda não entraram
+      </p>
+    </div>
+
+    <div className="rounded-2xl border border-sky-200 bg-white p-4 shadow-sm sm:p-5">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-slate-500">
+          Comparecimento
+        </p>
+
+        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 text-lg">
+          📈
+        </span>
+      </div>
+
+      <p className="mt-3 text-3xl font-black text-blue-600 sm:text-4xl">
+        {indicadoresParticipantes.porcentagemComparecimento}%
+      </p>
+
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+        <div
+          className="h-full rounded-full bg-blue-600"
+          style={{
+            width: `${Math.min(
+              100,
+              indicadoresParticipantes.porcentagemComparecimento
+            )}%`,
+          }}
+        />
+      </div>
+    </div>
+
+  </div>
+
+  {/* SEGUNDA LINHA */}
+
+  <div className="grid gap-4 lg:grid-cols-3">
+
+    {/* PERFIL DO PÚBLICO */}
+
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+          Perfil do público
+        </p>
+
+        <h3 className="mt-1 text-lg font-black text-blue-950">
+          Distribuição estimada
+        </h3>
+      </div>
+
+      <div className="mt-5 space-y-5">
+
+        <div>
+          <div className="mb-2 flex items-center justify-between text-sm">
+            <span className="font-semibold text-slate-600">
+              👨 Homens
+            </span>
+
+            <span className="font-black text-sky-600">
+              {indicadoresParticipantes.homens} · {percentualHomens}%
+            </span>
+          </div>
+
+          <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+            <div
+              className="h-full rounded-full bg-sky-500"
+              style={{ width: `${percentualHomens}%` }}
+            />
+          </div>
         </div>
+
+        <div>
+          <div className="mb-2 flex items-center justify-between text-sm">
+            <span className="font-semibold text-slate-600">
+              👩 Mulheres
+            </span>
+
+            <span className="font-black text-pink-600">
+              {indicadoresParticipantes.mulheres} · {percentualMulheres}%
+            </span>
+          </div>
+
+          <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+            <div
+              className="h-full rounded-full bg-pink-500"
+              style={{ width: `${percentualMulheres}%` }}
+            />
+          </div>
+        </div>
+
+        <div>
+          <div className="mb-2 flex items-center justify-between text-sm">
+            <span className="font-semibold text-slate-600">
+              ❓ Indeterminado
+            </span>
+
+            <span className="font-black text-slate-600">
+              {indicadoresParticipantes.indeterminado} · {percentualIndeterminado}%
+            </span>
+          </div>
+
+          <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+            <div
+              className="h-full rounded-full bg-slate-400"
+              style={{ width: `${percentualIndeterminado}%` }}
+            />
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    {/* CHECK-IN POR PERFIL */}
+
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+        Check-in por perfil
+      </p>
+
+      <h3 className="mt-1 text-lg font-black text-blue-950">
+        Presença do público
+      </h3>
+
+      <div className="mt-5 grid grid-cols-2 gap-3">
+
+        <div className="rounded-xl bg-emerald-50 p-3">
+          <p className="text-xs font-semibold text-emerald-700">
+            Homens presentes
+          </p>
+          <p className="mt-1 text-2xl font-black text-emerald-600">
+            {indicadoresParticipantes.homensPresentes}
+          </p>
+        </div>
+
+        <div className="rounded-xl bg-teal-50 p-3">
+          <p className="text-xs font-semibold text-teal-700">
+            Mulheres presentes
+          </p>
+          <p className="mt-1 text-2xl font-black text-teal-600">
+            {indicadoresParticipantes.mulheresPresentes}
+          </p>
+        </div>
+
+        <div className="rounded-xl bg-amber-50 p-3">
+          <p className="text-xs font-semibold text-amber-700">
+            Homens pendentes
+          </p>
+          <p className="mt-1 text-2xl font-black text-amber-600">
+            {indicadoresParticipantes.homensPendentes}
+          </p>
+        </div>
+
+        <div className="rounded-xl bg-orange-50 p-3">
+          <p className="text-xs font-semibold text-orange-700">
+            Mulheres pendentes
+          </p>
+          <p className="mt-1 text-2xl font-black text-orange-600">
+            {indicadoresParticipantes.mulheresPendentes}
+          </p>
+        </div>
+
+      </div>
+    </div>
+
+    {/* HORÁRIO */}
+
+    <div className="rounded-2xl border border-orange-200 bg-white p-5 shadow-sm">
+      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+        Movimento da portaria
+      </p>
+
+      <h3 className="mt-1 text-lg font-black text-blue-950">
+        Horário mais quente
+      </h3>
+
+      <div className="mt-7 text-center">
+        <div className="text-4xl">
+          🔥
+        </div>
+
+        <p className="mt-3 text-4xl font-black text-orange-500">
+          {indicadoresParticipantes.horarioMaisQuente}
+        </p>
+
+        <p className="mt-2 text-sm text-slate-500">
+          maior concentração de entradas
+        </p>
+      </div>
+    </div>
+
+  </div>
+
+  {/* DESEMPENHO DAS LISTAS */}
+
+  <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+          Comparativo
+        </p>
+
+        <h3 className="mt-1 text-lg font-black text-blue-950">
+          Desempenho das listas
+        </h3>
+      </div>
+
+      <p className="text-xs text-slate-400">
+        Ordenado por número de inscritos
+      </p>
+    </div>
+
+    <div className="mt-5 overflow-x-auto">
+
+      <table className="w-full min-w-[650px]">
+
+        <thead>
+          <tr className="border-b border-slate-200 text-left text-xs font-bold uppercase tracking-wider text-slate-400">
+            <th className="pb-3">Lista</th>
+            <th className="pb-3 text-center">Inscritos</th>
+            <th className="pb-3 text-center">Presentes</th>
+            <th className="pb-3 text-center">Comparecimento</th>
+            <th className="pb-3 text-center">Status</th>
+          </tr>
+        </thead>
+
+        <tbody>
+
+          {desempenhoListas.map((lista) => (
+
+            <tr
+              key={lista.id}
+              className="border-b border-slate-100 last:border-0"
+            >
+
+              <td className="py-3 pr-4 font-bold text-slate-800">
+                {lista.nome}
+              </td>
+
+              <td className="py-3 text-center font-bold text-blue-700">
+                {lista.inscritos}
+              </td>
+
+              <td className="py-3 text-center font-bold text-green-600">
+                {lista.presentes}
+              </td>
+
+              <td className="py-3 text-center">
+                <span className="inline-flex rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">
+                  {lista.comparecimento}%
+                </span>
+              </td>
+
+              <td className="py-3 text-center">
+                <span
+                  className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${
+                    lista.ativa
+                      ? "bg-green-50 text-green-700"
+                      : "bg-slate-100 text-slate-500"
+                  }`}
+                >
+                  {lista.ativa ? "Ativa" : "Inativa"}
+                </span>
+              </td>
+
+            </tr>
+
+          ))}
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+  </div>
+
+</div>
 
         {/* EXPORTAÇÃO */}
 
@@ -1453,404 +2158,30 @@ export default function EventoDashboard() {
           </div>
         ) : null}
 
-        {/* BUSCA */}
+        {/* PORTARIA / CHECK-IN SEPARADO */}
 
-        <div id="convidados" className="mb-6 rounded-3xl border border-blue-100 bg-white p-5 shadow-sm">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="mb-2 rounded-3xl border border-blue-200 bg-blue-50/60 p-5 sm:p-6 shadow-sm">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-2xl font-bold text-blue-900">Convidados e check-in</h2>
-              <p className="mt-1 text-sm text-slate-500">Busque um participante para agilizar o atendimento na porta.</p>
+              <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-blue-600">
+                Operação de entrada
+              </p>
+              <h2 className="mt-1 text-2xl font-black text-blue-950">
+                Portaria / Check-in
+              </h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                O check-in agora possui uma tela própria, mais leve e otimizada para celular.
+                Use-a na entrada do evento para localizar convidados e confirmar a presença com rapidez.
+              </p>
             </div>
 
-            <input
-              type="text"
-              placeholder="Buscar por nome, sobrenome ou WhatsApp"
-              value={busca}
-              onChange={(e) =>
-                setBusca(
-                  e.target.value
-                )
-              }
-              className="ui-field text-base md:max-w-md"
-            />
-          </div>
-
-          <div className="mt-4 md:max-w-md">
-            <label className="mb-2 block text-sm font-semibold text-blue-900">Ordenar por</label>
-            <select
-              value={ordenacaoParticipantes}
-              onChange={(e) =>
-                setOrdenacaoParticipantes(
-                  e.target.value as "cadastro_antigos" | "cadastro_recentes" | "nome_az" | "nome_za"
-                )
-              }
-              className="ui-field"
+            <Link
+              href={`/admin/eventos/${evento.slug}/checkin`}
+              className="inline-flex min-h-12 shrink-0 items-center justify-center rounded-2xl bg-blue-700 px-6 py-3 text-sm font-extrabold text-white shadow-sm transition hover:bg-blue-600"
             >
-              <option value="cadastro_antigos">Ordem de cadastro (Mais antigos)</option>
-              <option value="cadastro_recentes">Ordem de cadastro (Mais recentes)</option>
-              <option value="nome_az">Nome A → Z</option>
-              <option value="nome_za">Nome Z → A</option>
-            </select>
+              Abrir Portaria
+            </Link>
           </div>
-        </div>
-
-        {mensagemParticipante ? (
-          <p
-            className={`mb-6 rounded-2xl border px-4 py-3 text-sm font-semibold ${
-              mensagemParticipante.tipo === "erro"
-                ? "border-red-200 bg-red-50 text-red-700"
-                : "border-green-200 bg-green-50 text-green-700"
-            }`}
-          >
-            {mensagemParticipante.texto}
-          </p>
-        ) : null}
-
-        {/* FILTROS */}
-
-        <div className="flex gap-3 mb-4 flex-wrap">
-
-          <button
-            onClick={() => {
-              setFiltroStatus("todos");
-              setFiltroSexo("todos");
-              setFiltroListaAtivo(false);
-              setFiltroListaId(null);
-            }}
-            className={`ui-toggle-btn px-4 sm:px-5 py-3 rounded-xl font-bold transition min-h-11 ${
-              filtroStatus === "todos" && filtroSexo === "todos" && !filtroListaAtivo ? "ui-toggle-btn-active" : ""
-            }`}
-          >
-            Todos
-          </button>
-
-          <button
-            onClick={() => setFiltroStatus("presentes")}
-            className={`ui-toggle-btn px-4 sm:px-5 py-3 rounded-xl font-bold transition min-h-11 ${
-              filtroStatus === "presentes" ? "ui-toggle-btn-active" : ""
-            }`}
-          >
-            Presentes
-          </button>
-
-          <button
-            onClick={() => setFiltroStatus("pendentes")}
-            className={`ui-toggle-btn px-4 sm:px-5 py-3 rounded-xl font-bold transition min-h-11 ${
-              filtroStatus === "pendentes" ? "ui-toggle-btn-active" : ""
-            }`}
-          >
-            Pendentes
-          </button>
-
-          <button
-            onClick={() => setFiltroSexo("homens")}
-            className={`ui-toggle-btn px-4 sm:px-5 py-3 rounded-xl font-bold transition min-h-11 ${
-              filtroSexo === "homens" ? "ui-toggle-btn-active" : ""
-            }`}
-          >
-            Homens
-          </button>
-
-          <button
-            onClick={() => setFiltroSexo("mulheres")}
-            className={`ui-toggle-btn px-4 sm:px-5 py-3 rounded-xl font-bold transition min-h-11 ${
-              filtroSexo === "mulheres" ? "ui-toggle-btn-active" : ""
-            }`}
-          >
-            Mulheres
-          </button>
-
-          <button
-            onClick={() => setFiltroSexo("indeterminados")}
-            className={`ui-toggle-btn px-4 sm:px-5 py-3 rounded-xl font-bold transition min-h-11 ${
-              filtroSexo === "indeterminados" ? "ui-toggle-btn-active" : ""
-            }`}
-          >
-            Indeterminados
-          </button>
-
-          <button
-            onClick={() => {
-              const proximoAtivo = !filtroListaAtivo;
-              setFiltroListaAtivo(proximoAtivo);
-
-              if (!proximoAtivo) {
-                setFiltroListaId(null);
-                return;
-              }
-
-              if (filtroListaId === null && listasEvento.length > 0) {
-                setFiltroListaId(listasEvento[0].id);
-              }
-            }}
-            className={`ui-toggle-btn px-4 sm:px-5 py-3 rounded-xl font-bold transition min-h-11 ${
-              filtroListaAtivo ? "ui-toggle-btn-active" : ""
-            }`}
-          >
-            Por Lista
-          </button>
-
-        </div>
-
-        {filtroListaAtivo ? (
-          <div className="mb-6 max-w-md">
-            <label className="mb-2 block text-sm font-semibold text-blue-900">Selecionar Lista</label>
-            <select
-              value={filtroListaId ?? ""}
-              onChange={(e) => setFiltroListaId(e.target.value ? Number(e.target.value) : null)}
-              className="ui-field"
-            >
-              {listasEvento.length === 0 ? <option value="">Sem listas</option> : null}
-              {listasEvento.map((lista) => (
-                <option key={lista.id} value={lista.id}>
-                  {lista.nome}
-                </option>
-              ))}
-            </select>
-          </div>
-        ) : null}
-
-        {/* CHECK-IN MOBILE */}
-
-        <div className="space-y-3 md:hidden">
-          {participantesFiltrados.map((participante) => {
-            const lista = infoLista(participante);
-
-            return (
-              <article
-                key={participante.id}
-                className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
-              >
-                <div className="space-y-1">
-                  <h3 className="text-lg font-bold text-slate-900 break-words">{participante.nome}</h3>
-                  <p className="text-sm text-slate-600">Regra da Lista: {lista.regra}</p>
-                  <p className="text-sm text-slate-600">WhatsApp: {participante.whatsapp || "-"}</p>
-                  <p className="text-sm text-slate-600">Horário: {participante.entrada_confirmada_em
-                    ? new Date(participante.entrada_confirmada_em).toLocaleTimeString("pt-BR", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })
-                    : "-"}</p>
-                </div>
-
-                <div className="mt-3 flex items-center justify-between gap-3">
-                  <p className={participante.presente ? "text-green-600 font-bold" : "text-amber-600 font-bold"}>
-                    {participante.presente ? "PRESENTE" : "PENDENTE"}
-                  </p>
-
-                  {!participante.presente ? (
-                    <button
-                      onClick={() => fazerCheckin(participante.id)}
-                      disabled={processandoParticipanteId === participante.id}
-                      className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl font-bold min-h-11"
-                    >
-                      Fazer Check-in
-                    </button>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <span className="text-green-600 font-bold">✓ Confirmado</span>
-                      <button
-                        onClick={() => desfazerCheckin(participante.id)}
-                        disabled={processandoParticipanteId === participante.id}
-                        className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
-                      >
-                        Desfazer Check-in
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    onClick={() => void excluirParticipante(participante.id)}
-                    disabled={processandoParticipanteId === participante.id}
-                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-red-300 bg-red-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-400 disabled:cursor-not-allowed disabled:bg-slate-300"
-                  >
-                    Excluir participante
-                  </button>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-
-        {/* TABELA DESKTOP */}
-
-        <div className="hidden md:block overflow-x-auto rounded-3xl border border-blue-100 bg-white shadow-sm">
-
-          <table className="w-full min-w-[1050px] table-fixed">
-
-            <colgroup>
-              <col className="w-[22%]" />
-              <col className="w-[16%]" />
-              <col className="w-[25%]" />
-              <col className="w-[12%]" />
-              <col className="w-[12%]" />
-              <col className="w-[13%]" />
-            </colgroup>
-
-            <thead className="bg-blue-50 text-slate-700">
-
-              <tr>
-
-                <th className="p-4 text-left">
-                  Nome
-                </th>
-
-                <th className="p-4 text-left">
-                  WhatsApp
-                </th>
-
-                <th className="p-4 text-left">
-                  Regra da Lista
-                </th>
-
-                <th className="p-4 text-left">
-                  Status
-                </th>
-
-                <th className="p-4 text-left whitespace-nowrap">
-                  Horário Entrada
-                </th>
-
-                <th className="p-4 text-left">
-                  Ação
-                </th>
-
-              </tr>
-
-            </thead>
-
-            <tbody>
-
-              {participantesFiltrados.map(
-                (participante) => (
-
-                  (() => {
-                    const lista = infoLista(participante);
-
-                    return (
-
-                  <tr
-                    key={
-                      participante.id
-                    }
-                    className={`border-t border-slate-200 ${
-                      participante.presente
-                        ? "bg-green-50"
-                        : ""
-                    }`}
-                  >
-
-                    <td className="p-4 break-words">
-                      {participante.nome}
-                    </td>
-
-                    <td className="p-4">
-                      {participante.whatsapp || "-"}
-                    </td>
-
-                    <td className="p-4 break-words">
-                      {lista.regra}
-                    </td>
-
-                    <td className="p-4">
-
-                      {participante.presente ? (
-
-                        <span className="text-green-600 font-bold">
-                          PRESENTE
-                        </span>
-
-                      ) : (
-
-                        <span className="text-amber-600 font-bold">
-                          PENDENTE
-                        </span>
-
-                      )}
-
-                    </td>
-
-                    <td className="p-4">
-
-                      {participante.entrada_confirmada_em
-                        ? new Date(
-                            participante.entrada_confirmada_em
-                          ).toLocaleTimeString(
-                            "pt-BR",
-                            {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            }
-                          )
-                        : "-"}
-
-                    </td>
-
-                    <td className="p-4 whitespace-nowrap">
-
-                      {!participante.presente ? (
-
-                        <button
-                          onClick={() =>
-                            fazerCheckin(
-                              participante.id
-                            )
-                          }
-                          disabled={processandoParticipanteId === participante.id}
-                          className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-xl font-bold transition"
-                        >
-                          Fazer Check-in
-                        </button>
-
-                      ) : (
-
-                        <div className="flex items-center gap-2">
-                          <span className="text-green-600 font-bold">
-                            ✓ Confirmado
-                          </span>
-                          <button
-                            onClick={() =>
-                              desfazerCheckin(
-                                participante.id
-                              )
-                            }
-                            disabled={processandoParticipanteId === participante.id}
-                            className="rounded-xl border border-slate-300 bg-white px-4 py-2 font-bold text-slate-700 transition hover:bg-slate-50"
-                          >
-                            Desfazer Check-in
-                          </button>
-                        </div>
-
-                      )}
-
-                      <div className="mt-2">
-                        <button
-                          type="button"
-                          onClick={() => void excluirParticipante(participante.id)}
-                          disabled={processandoParticipanteId === participante.id}
-                          className="inline-flex min-h-10 items-center justify-center rounded-xl border border-red-300 bg-red-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-400 disabled:cursor-not-allowed disabled:bg-slate-300"
-                        >
-                          Excluir participante
-                        </button>
-                      </div>
-
-                    </td>
-
-                  </tr>
-
-                    );
-                  })()
-
-                )
-              )}
-
-            </tbody>
-
-          </table>
-
         </div>
 
       </section>
