@@ -8,7 +8,6 @@ import AdminShell from "@/app/components/AdminShell";
 import AdminEventTabs from "@/app/components/AdminEventTabs";
 import {
   erroEhDuplicidadeParticipante,
-  extrairNomesUnicosPorLinha,
   mensagemDuplicidadeEvento,
   normalizarNomeParticipante,
   validarNomeCompletoParticipante,
@@ -73,6 +72,102 @@ function debugLog(...args: unknown[]) {
   if (process.env.NODE_ENV !== "production") {
     console.log(...args);
   }
+}
+
+function limparMarcadorInicialNome(valor: string) {
+  return valor
+    .replace(/^\s*[-–—•·▪◦*]+\s*/u, "")
+    .replace(/^\s*\(?\d{1,3}\)?(?:[.)\-:])?\s+/u, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extrairItensNumeradosNaMesmaLinha(linha: string) {
+  const marcador = /(?:^|\s)(\d{1,3})(?:[.)\-:])?\s+(?=\p{L})/gu;
+  const encontrados = [...linha.matchAll(marcador)];
+
+  if (encontrados.length < 2) {
+    return null;
+  }
+
+  const itens: string[] = [];
+
+  for (let index = 0; index < encontrados.length; index += 1) {
+    const atual = encontrados[index];
+    const proximo = encontrados[index + 1];
+
+    if (atual.index === undefined) continue;
+
+    const inicio = atual.index + atual[0].length;
+    const fim = proximo?.index ?? linha.length;
+    const item = limparMarcadorInicialNome(linha.slice(inicio, fim));
+
+    if (item) itens.push(item);
+  }
+
+  return itens.length > 0 ? itens : null;
+}
+
+function extrairItensSeparadosPorTracoNaMesmaLinha(linha: string) {
+  const linhaSemMarcadorInicial = linha.replace(/^\s*[-–—•·▪◦*]+\s*/u, "");
+  const separadores = linhaSemMarcadorInicial.match(/\s+[-–—•·▪◦*]\s+/gu) || [];
+
+  if (separadores.length < 2) {
+    return null;
+  }
+
+  const itens = linhaSemMarcadorInicial
+    .split(/\s+[-–—•·▪◦*]\s+/gu)
+    .map(limparMarcadorInicialNome)
+    .filter(Boolean);
+
+  return itens.length > 0 ? itens : null;
+}
+
+function extrairNomesFlexiveisParaImportacao(texto: string) {
+  const candidatos: string[] = [];
+
+  const linhas = texto
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((linha) => linha.trim())
+    .filter(Boolean);
+
+  for (const linhaOriginal of linhas) {
+    const numerados = extrairItensNumeradosNaMesmaLinha(linhaOriginal);
+
+    if (numerados) {
+      candidatos.push(...numerados);
+      continue;
+    }
+
+    const separadosPorTraco = extrairItensSeparadosPorTracoNaMesmaLinha(linhaOriginal);
+
+    if (separadosPorTraco) {
+      candidatos.push(...separadosPorTraco);
+      continue;
+    }
+
+    candidatos.push(limparMarcadorInicialNome(linhaOriginal));
+  }
+
+  const unicos: string[] = [];
+  const nomesNormalizados = new Set<string>();
+
+  for (const candidato of candidatos) {
+    const nomeLimpo = limparMarcadorInicialNome(candidato);
+
+    if (!nomeLimpo) continue;
+
+    const chave = normalizarNomeParticipante(nomeLimpo);
+
+    if (!chave || nomesNormalizados.has(chave)) continue;
+
+    nomesNormalizados.add(chave);
+    unicos.push(nomeLimpo);
+  }
+
+  return unicos;
 }
 
 function criarIndiceParticipantesEvento(participantes: ParticipanteDuplicidadeRow[]) {
@@ -321,7 +416,7 @@ export default function ParticipantesDaListaPage() {
       return;
     }
 
-    const nomes = extrairNomesUnicosPorLinha(nomesEmMassa);
+    const nomes = extrairNomesFlexiveisParaImportacao(nomesEmMassa);
 
     if (nomes.length === 0) {
       setErroCadastro(true);
@@ -699,11 +794,16 @@ export default function ParticipantesDaListaPage() {
               </div>
             ) : null}
 
+            <p className="mb-4 text-sm text-slate-500">
+              O sistema remove automaticamente marcadores como traços, bullets e
+              numeração de lista antes de validar os nomes.
+            </p>
+
             <form onSubmit={importarParticipantesSimples} className="space-y-4">
               <textarea
                 value={nomesEmMassa}
                 onChange={(e) => setNomesEmMassa(e.target.value)}
-                placeholder="Digite nome e sobrenome, um por linha"
+                placeholder={"Cole a lista como recebeu. Ex.:\n- Andre Souza\n- Dayane Silva\n\nou\n1 Andre Souza 2 Dayane Silva 3 Lorenzo Oliveira"}
                 className="ui-field h-48"
                 disabled={!podeCadastrarParticipante || salvandoSimples}
               />
