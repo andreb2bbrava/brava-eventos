@@ -30,6 +30,16 @@ type ParticipanteRevisaoRow = {
     | null;
 };
 
+type ParticipanteCorrecaoRow = {
+  id: number;
+  nome: string | null;
+  evento_id: number | null;
+};
+
+type Sexo = "Masculino" | "Feminino";
+
+const LIMITE_CORRECAO_MASSA = 100;
+
 const CAMINHO_NOMES_MASCULINOS = join(
   process.cwd(),
   "lib",
@@ -91,11 +101,46 @@ function obterNomeRelacionamento(
   return relacao.nome || "-";
 }
 
+function normalizarIdsParticipantes(
+  participanteId?: number,
+  participanteIds?: number[]
+) {
+  const idsRecebidos: number[] = [];
+
+  if (Number.isFinite(Number(participanteId))) {
+    idsRecebidos.push(Number(participanteId));
+  }
+
+  if (Array.isArray(participanteIds)) {
+    for (const id of participanteIds) {
+      const numero = Number(id);
+
+      if (Number.isFinite(numero)) {
+        idsRecebidos.push(numero);
+      }
+    }
+  }
+
+  return Array.from(
+    new Set(
+      idsRecebidos
+        .filter((id) => Number.isInteger(id))
+        .filter((id) => id > 0)
+    )
+  );
+}
+
 async function autenticarUsuario(
   request: Request
 ): Promise<
-  | { ok: true; usuario: UsuarioAutenticado }
-  | { ok: false; response: NextResponse }
+  | {
+      ok: true;
+      usuario: UsuarioAutenticado;
+    }
+  | {
+      ok: false;
+      response: NextResponse;
+    }
 > {
   const token = obterToken(request);
 
@@ -103,8 +148,12 @@ async function autenticarUsuario(
     return {
       ok: false,
       response: NextResponse.json(
-        { error: "Sessao invalida." },
-        { status: 401 }
+        {
+          error: "Sessao invalida.",
+        },
+        {
+          status: 401,
+        }
       ),
     };
   }
@@ -116,17 +165,22 @@ async function autenticarUsuario(
     return {
       ok: false,
       response: NextResponse.json(
-        { error: "Sessao invalida." },
-        { status: 401 }
+        {
+          error: "Sessao invalida.",
+        },
+        {
+          status: 401,
+        }
       ),
     };
   }
 
-  const { data: usuarioData, error: usuarioError } = await supabaseAdmin
-    .from("usuarios")
-    .select("id, role")
-    .eq("id", authData.user.id)
-    .single();
+  const { data: usuarioData, error: usuarioError } =
+    await supabaseAdmin
+      .from("usuarios")
+      .select("id, role")
+      .eq("id", authData.user.id)
+      .single();
 
   const role = resolverRoleUsuario(usuarioData?.role);
 
@@ -134,8 +188,12 @@ async function autenticarUsuario(
     return {
       ok: false,
       response: NextResponse.json(
-        { error: "Usuario sem permissao." },
-        { status: 403 }
+        {
+          error: "Usuario sem permissao.",
+        },
+        {
+          status: 403,
+        }
       ),
     };
   }
@@ -148,7 +206,9 @@ async function autenticarUsuario(
           error:
             "Usuario sem permissao para revisar inteligencia.",
         },
-        { status: 403 }
+        {
+          status: 403,
+        }
       ),
     };
   }
@@ -220,26 +280,55 @@ function adicionarNomeNaBase(
   );
 }
 
+function tentarAdicionarNomeNaBase(
+  sexo: Sexo,
+  nome: string | null
+) {
+  try {
+    const caminhoBase =
+      sexo === "Masculino"
+        ? CAMINHO_NOMES_MASCULINOS
+        : CAMINHO_NOMES_FEMININOS;
+
+    adicionarNomeNaBase(
+      caminhoBase,
+      nome || ""
+    );
+  } catch (erroArquivo) {
+    console.warn(
+      "Nao foi possivel atualizar a base local de nomes. A correcao manual foi mantida no banco.",
+      erroArquivo
+    );
+  }
+}
+
 export async function GET(request: Request) {
   try {
-    const authResult = await autenticarUsuario(request);
+    const authResult =
+      await autenticarUsuario(request);
 
     if (!authResult.ok) {
       return authResult.response;
     }
 
-    const { searchParams } = new URL(request.url);
+    const { searchParams } =
+      new URL(request.url);
 
     const page = Math.max(
       1,
-      Number(searchParams.get("page") || "1")
+      Number(
+        searchParams.get("page") || "1"
+      )
     );
 
     const pageSize = Math.min(
       100,
       Math.max(
         10,
-        Number(searchParams.get("pageSize") || "20")
+        Number(
+          searchParams.get("pageSize") ||
+            "20"
+        )
       )
     );
 
@@ -248,7 +337,9 @@ export async function GET(request: Request) {
     ).trim();
 
     const eventosPermitidos =
-      await listarEventosPermitidos(authResult.usuario);
+      await listarEventosPermitidos(
+        authResult.usuario
+      );
 
     if (
       eventosPermitidos &&
@@ -267,10 +358,17 @@ export async function GET(request: Request) {
       .from("participantes")
       .select(
         "id, nome, whatsapp, evento_id, created_at, listas_evento(nome), eventos(nome)",
-        { count: "exact" }
+        {
+          count: "exact",
+        }
       )
-      .eq("sexo_estimado", "Indeterminado")
-      .order("id", { ascending: false });
+      .eq(
+        "sexo_estimado",
+        "Indeterminado"
+      )
+      .order("id", {
+        ascending: false,
+      });
 
     if (eventosPermitidos) {
       query = query.in(
@@ -286,42 +384,66 @@ export async function GET(request: Request) {
       );
     }
 
-    const inicio = (page - 1) * pageSize;
-    const fim = inicio + pageSize - 1;
+    const inicio =
+      (page - 1) * pageSize;
 
-    const { data, error, count } =
-      await query.range(inicio, fim);
+    const fim =
+      inicio + pageSize - 1;
+
+    const {
+      data,
+      error,
+      count,
+    } = await query.range(
+      inicio,
+      fim
+    );
 
     if (error) {
+      console.error(
+        "Erro ao carregar participantes indeterminados:",
+        error
+      );
+
       return NextResponse.json(
         {
           error:
             "Nao foi possivel carregar participantes indeterminados.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
     const items = (
-      (data || []) as ParticipanteRevisaoRow[]
+      (data ||
+        []) as ParticipanteRevisaoRow[]
     ).map((item) => ({
       id: item.id,
       nome: item.nome || "-",
-      whatsapp: item.whatsapp || "-",
-      lista: obterNomeRelacionamento(
-        item.listas_evento
-      ),
-      evento: obterNomeRelacionamento(
-        item.eventos
-      ),
-      dataCadastro: item.created_at,
+      whatsapp:
+        item.whatsapp || "-",
+      lista:
+        obterNomeRelacionamento(
+          item.listas_evento
+        ),
+      evento:
+        obterNomeRelacionamento(
+          item.eventos
+        ),
+      dataCadastro:
+        item.created_at,
     }));
 
-    const total = Number(count || 0);
+    const total =
+      Number(count || 0);
 
     const totalPages =
       total > 0
-        ? Math.ceil(total / pageSize)
+        ? Math.ceil(
+            total / pageSize
+          )
         : 0;
 
     return NextResponse.json({
@@ -342,63 +464,127 @@ export async function GET(request: Request) {
         error:
           "Erro interno ao consultar revisao de inteligencia.",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }
 
-export async function PATCH(request: Request) {
+export async function PATCH(
+  request: Request
+) {
   try {
-    const authResult = await autenticarUsuario(request);
+    const authResult =
+      await autenticarUsuario(request);
 
     if (!authResult.ok) {
       return authResult.response;
     }
 
-    const body = (await request.json()) as {
-      participanteId?: number;
-      sexo?: "Masculino" | "Feminino";
-    };
-
-    const participanteId = Number(
-      body?.participanteId
-    );
+    const body =
+      (await request.json()) as {
+        participanteId?: number;
+        participanteIds?: number[];
+        sexo?: Sexo;
+      };
 
     const sexo = body?.sexo;
 
     if (
-      !Number.isFinite(participanteId) ||
-      (sexo !== "Masculino" &&
-        sexo !== "Feminino")
+      sexo !== "Masculino" &&
+      sexo !== "Feminino"
     ) {
       return NextResponse.json(
         {
           error:
-            "Dados invalidos para correcao manual.",
+            "Sexo invalido para correcao manual.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
+      );
+    }
+
+    const participanteIds =
+      normalizarIdsParticipantes(
+        body?.participanteId,
+        body?.participanteIds
+      );
+
+    if (
+      participanteIds.length === 0
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Nenhum participante valido foi informado.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    if (
+      participanteIds.length >
+      LIMITE_CORRECAO_MASSA
+    ) {
+      return NextResponse.json(
+        {
+          error: `O limite e de ${LIMITE_CORRECAO_MASSA} participantes por operacao.`,
+        },
+        {
+          status: 400,
+        }
       );
     }
 
     const {
-      data: participante,
-      error: participanteError,
+      data: participantes,
+      error: participantesError,
     } = await supabaseAdmin
       .from("participantes")
-      .select("id, nome, evento_id")
-      .eq("id", participanteId)
-      .maybeSingle();
+      .select(
+        "id, nome, evento_id"
+      )
+      .in("id", participanteIds);
 
     if (
-      participanteError ||
-      !participante
+      participantesError
+    ) {
+      console.error(
+        "Erro ao consultar participantes para correcao:",
+        participantesError
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "Nao foi possivel consultar os participantes selecionados.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    const participantesEncontrados =
+      (participantes ||
+        []) as ParticipanteCorrecaoRow[];
+
+    if (
+      participantesEncontrados.length !==
+      participanteIds.length
     ) {
       return NextResponse.json(
         {
           error:
-            "Participante nao encontrado.",
+            "Um ou mais participantes selecionados nao foram encontrados.",
         },
-        { status: 404 }
+        {
+          status: 404,
+        }
       );
     }
 
@@ -407,27 +593,63 @@ export async function PATCH(request: Request) {
         authResult.usuario.role
       )
     ) {
-      const { data: vinculo } =
-        await supabaseAdmin
-          .from("evento_produtores")
-          .select("id")
-          .eq(
-            "usuario_id",
-            authResult.usuario.id
-          )
-          .eq(
-            "evento_id",
-            participante.evento_id
-          )
-          .maybeSingle();
+      const eventosPermitidos =
+        await listarEventosPermitidos(
+          authResult.usuario
+        );
 
-      if (!vinculo) {
+      if (
+        !eventosPermitidos ||
+        eventosPermitidos.length === 0
+      ) {
         return NextResponse.json(
           {
             error:
-              "Sem permissao para alterar este participante.",
+              "Sem permissao para alterar os participantes selecionados.",
           },
-          { status: 403 }
+          {
+            status: 403,
+          }
+        );
+      }
+
+      const eventosPermitidosSet =
+        new Set(
+          eventosPermitidos.map(
+            (id) => Number(id)
+          )
+        );
+
+      const possuiParticipanteSemPermissao =
+        participantesEncontrados.some(
+          (participante) => {
+            const eventoId =
+              Number(
+                participante.evento_id
+              );
+
+            return (
+              !Number.isFinite(
+                eventoId
+              ) ||
+              !eventosPermitidosSet.has(
+                eventoId
+              )
+            );
+          }
+        );
+
+      if (
+        possuiParticipanteSemPermissao
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Voce nao possui permissao para alterar um ou mais participantes selecionados.",
+          },
+          {
+            status: 403,
+          }
         );
       }
     }
@@ -436,7 +658,7 @@ export async function PATCH(request: Request) {
       new Date().toISOString();
 
     const {
-      data: atualizado,
+      data: atualizados,
       error: updateError,
     } = await supabaseAdmin
       .from("participantes")
@@ -448,62 +670,106 @@ export async function PATCH(request: Request) {
         motor_inteligencia:
           "Administrador",
         versao_motor: "1.0",
-        classificado_em: agora,
+        classificado_em:
+          agora,
       })
-      .eq("id", participanteId)
+      .in(
+        "id",
+        participanteIds
+      )
       .select(
         "id, nome, sexo_estimado"
-      )
-      .single();
+      );
 
     if (
       updateError ||
-      !atualizado
+      !atualizados
     ) {
       console.error(
-        "Erro ao atualizar participante:",
+        "Erro ao atualizar participantes:",
         updateError
       );
 
       return NextResponse.json(
         {
           error:
-            "Nao foi possivel aplicar correcao manual.",
+            participanteIds.length ===
+            1
+              ? "Nao foi possivel aplicar correcao manual."
+              : "Nao foi possivel aplicar a correcao em massa.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
+      );
+    }
+
+    if (
+      atualizados.length !==
+      participanteIds.length
+    ) {
+      console.error(
+        "Quantidade de participantes atualizados diferente da quantidade solicitada.",
+        {
+          solicitados:
+            participanteIds.length,
+          atualizados:
+            atualizados.length,
+        }
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "Nem todos os participantes selecionados puderam ser atualizados.",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
     /*
-     * A correcao manual ja foi salva no Supabase.
+     * A classificacao principal ja foi salva no Supabase.
      *
-     * A atualizacao dos arquivos JSON locais e apenas complementar.
-     * Em ambientes serverless, como Vercel, o sistema pode nao ter
-     * permissao para alterar arquivos do projeto em runtime.
+     * A atualizacao dos JSON locais permanece apenas como
+     * recurso complementar para o mecanismo legado de nomes.
      *
-     * Por isso, uma falha ao atualizar o JSON nao pode cancelar
-     * uma correcao que ja foi salva corretamente no banco.
+     * Em ambientes serverless, como Vercel, a escrita desses
+     * arquivos pode falhar. Essa falha nao pode desfazer nem
+     * transformar em erro uma correcao ja gravada no banco.
      */
-    try {
-      const caminhoBase =
-        sexo === "Masculino"
-          ? CAMINHO_NOMES_MASCULINOS
-          : CAMINHO_NOMES_FEMININOS;
+    for (
+      const participante of participantesEncontrados
+    ) {
+      tentarAdicionarNomeNaBase(
+        sexo,
+        participante.nome
+      );
+    }
 
-      adicionarNomeNaBase(
-        caminhoBase,
-        participante.nome || ""
-      );
-    } catch (erroArquivo) {
-      console.warn(
-        "Nao foi possivel atualizar a base local de nomes. A correcao manual foi mantida no banco.",
-        erroArquivo
-      );
+    /*
+     * Mantemos compatibilidade total com a tela antiga.
+     * Quando apenas um participante for enviado, a resposta
+     * continua trazendo "participante".
+     */
+    if (
+      participanteIds.length === 1
+    ) {
+      return NextResponse.json({
+        success: true,
+        participante:
+          atualizados[0],
+        atualizados: 1,
+      });
     }
 
     return NextResponse.json({
       success: true,
-      participante: atualizado,
+      atualizados:
+        atualizados.length,
+      participantes:
+        atualizados,
     });
   } catch (error) {
     console.error(
@@ -516,7 +782,9 @@ export async function PATCH(request: Request) {
         error:
           "Erro interno ao atualizar correcao manual.",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }
