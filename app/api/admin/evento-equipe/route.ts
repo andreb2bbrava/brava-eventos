@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isAdminRole, resolverRoleUsuario } from "@/lib/roles";
+import { canManageEventProducersRole, canManageEventStaffRole, isAdminRole, resolverRoleUsuario } from "@/lib/roles";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 type TipoVinculo = "produtor" | "staff";
@@ -97,11 +97,11 @@ async function usuarioTemAcessoEvento(usuarioId: string, role: string, eventoId:
 }
 
 function podeGerenciarProdutores(role: string) {
-  return isAdminRole(role);
+  return canManageEventProducersRole(role);
 }
 
 function podeGerenciarStaff(role: string) {
-  return isAdminRole(role) || role === "produtor";
+  return canManageEventStaffRole(role);
 }
 
 function logErroSupabase(error: {
@@ -188,7 +188,7 @@ async function montarPayloadEquipe(eventoId: number) {
     .filter(Boolean);
 
   const usuariosProdutores = usuarios
-    .filter((usuario) => usuario.role === "produtor" || usuario.role === "super_admin" || usuario.role === "platform_owner")
+    .filter((usuario) => usuario.role === "produtor")
     .map((usuario) => ({
       id: usuario.id,
       nome: nomeExibicaoUsuario(usuario),
@@ -304,7 +304,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Usuario nao encontrado." }, { status: 404 });
     }
 
-    if (tipo === "produtor" && usuarioAlvo.role !== "produtor" && usuarioAlvo.role !== "super_admin" && usuarioAlvo.role !== "platform_owner") {
+    if (tipo === "produtor" && usuarioAlvo.role !== "produtor") {
       return NextResponse.json({ error: "Usuario invalido para vinculo de produtor." }, { status: 400 });
     }
 
