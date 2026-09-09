@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { podeEditarEvento, validarAcessoEvento } from "@/lib/permissoes";
+import { validarAcessoEvento } from "@/lib/permissoes";
 import { calcularIndicadoresParticipantes } from "@/lib/participantes";
 import AdminShell from "@/app/components/AdminShell";
 import AdminEventTabs from "@/app/components/AdminEventTabs";
@@ -12,7 +12,16 @@ import CopyLinkButton from "@/app/components/CopyLinkButton";
 import DeleteEventButton from "@/app/components/DeleteEventButton";
 import { gerarSlugUnicoLista } from "@/lib/slug";
 import { sanitizeMetaPixelId } from "@/lib/metaPixel";
-import { canEditEventRole, canExportParticipantsRole, isAdminRole, type RoleUsuario } from "@/lib/roles";
+import {
+  canCreateListRole,
+  canDeleteEventRole,
+  canDeleteListRole,
+  canEditEventRole,
+  canEditListRole,
+  canExportParticipantsRole,
+  isAdminRole,
+  type RoleUsuario,
+} from "@/lib/roles";
 
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
@@ -157,7 +166,6 @@ export default function EventoDashboard() {
 
   const [roleUsuario, setRoleUsuario] =
     useState<string | null>(null);
-  const [usuarioId, setUsuarioId] = useState<string | null>(null);
 
   const [listasEvento, setListasEvento] =
     useState<ListaEventoResumo[]>([]);
@@ -254,12 +262,6 @@ export default function EventoDashboard() {
     const { autorizado, evento: eventoData, erro, role } =
       await validarAcessoEvento(slug);
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    setUsuarioId(user?.id || null);
-
     if (!autorizado || !eventoData) {
       setAcessoNegado(true);
       setEvento(null);
@@ -347,26 +349,24 @@ export default function EventoDashboard() {
         return;
       }
 
-      const {
-        data: { user },
-        error: erroAuth,
-      } = await supabase.auth.getUser();
+      const editandoLista = Boolean(listaEditandoId);
 
-      if (erroAuth || !user?.id) {
-        console.error("Erro capturado no catch:", erroAuth || { message: "Usuário não autenticado." });
-        setMensagemLista("Usuário não autenticado.");
+      if (editandoLista && !canEditListRole(roleUsuario)) {
+        setMensagemLista("Seu perfil não possui permissão para editar listas.");
         return;
       }
 
-      const permissaoCriar = await podeEditarEvento(slug);
-      if (!permissaoCriar.autorizado) {
-        console.error("Erro capturado no catch:", {
-          message: "Usuário sem permissão para criar listas neste evento.",
-          details: permissaoCriar.erro || null,
-          code: "APP_FORBIDDEN_CREATE_LISTA",
-          error: permissaoCriar,
-        });
-        setMensagemLista("Não foi possível criar a lista. Verifique os dados e tente novamente.");
+      if (!editandoLista && !canCreateListRole(roleUsuario)) {
+        setMensagemLista("Seu perfil não possui permissão para criar listas.");
+        return;
+      }
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        setMensagemLista("Sua sessão expirou. Faça login novamente.");
         return;
       }
 
@@ -392,7 +392,6 @@ export default function EventoDashboard() {
         meta_pixel_id: pixelIdValido || null,
         ativa: typeof listaAtiva === "boolean" ? listaAtiva : true,
         slug: slugGerado,
-        criado_por: user.id,
       };
 
       if (!payload.evento_id) {
@@ -400,33 +399,39 @@ export default function EventoDashboard() {
         return;
       }
 
-      console.log("Payload enviado para listas_evento:", payload);
+      const response = await fetch("/api/admin/listas", {
+        method: listaEditandoId ? "PATCH" : "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          eventoId: evento.id,
+          listaId: listaEditandoId || undefined,
+          nome: String(payload.nome || ""),
+          regra: payload.regra ?? null,
+          tipoVisibilidade: payload.tipo_visibilidade,
+          tipoLista: payload.tipo_lista,
+          metaPixelId: payload.meta_pixel_id,
+          ativa: payload.ativa,
+          slug: payload.slug,
+        }),
+      });
 
-      const operacaoLista = listaEditandoId
-        ? await supabase
-            .from("listas_evento")
-            .update(payload)
-            .eq("id", listaEditandoId)
-            .eq("evento_id", evento.id)
-            .select("*")
-            .single()
-        : await supabase.from("listas_evento").insert([payload]).select("*").single();
+      const result = await response.json();
 
-      const erroSupabase = operacaoLista.error;
-
-      if (erroSupabase) {
-        console.error("Erro bruto Supabase:", erroSupabase);
-        console.error("Erro Supabase message:", erroSupabase?.message);
-        console.error("Erro Supabase details:", erroSupabase?.details);
-        console.error("Erro Supabase hint:", erroSupabase?.hint);
-        console.error("Erro Supabase code:", erroSupabase?.code);
-        console.error("Erro Supabase JSON:", JSON.stringify(erroSupabase, null, 2));
-
-        setMensagemLista("Não foi possível criar a lista. Verifique os dados e tente novamente.");
+      if (!response.ok || result.error) {
+        console.error("Erro ao salvar lista:", result);
+        setMensagemLista(
+          result.error ||
+            (listaEditandoId
+              ? "Não foi possível atualizar a lista. Tente novamente."
+              : "Não foi possível criar a lista. Verifique os dados e tente novamente.")
+        );
         return;
       }
 
-      const listaPersistida = operacaoLista.data as ListaEventoResumo;
+      const listaPersistida = result.lista as ListaEventoResumo;
 
       if (listaPersistida) {
         if (listaEditandoId) {
@@ -458,6 +463,11 @@ export default function EventoDashboard() {
   }
 
   function abrirCriacaoLista() {
+    if (!canCreateListRole(roleUsuario)) {
+      setMensagemLista("Seu perfil não possui permissão para criar listas.");
+      return;
+    }
+
     setMostrarCriarLista(true);
     setMensagemLista("");
     setListaEditandoId(null);
@@ -478,6 +488,11 @@ export default function EventoDashboard() {
   }
 
   function abrirEdicaoLista(lista: ListaEventoResumo) {
+    if (!canEditListRole(roleUsuario)) {
+      setMensagemLista("Seu perfil não possui permissão para editar listas.");
+      return;
+    }
+
     setMostrarCriarLista(true);
     setMensagemLista("");
     setListaEditandoId(lista.id);
@@ -498,19 +513,50 @@ export default function EventoDashboard() {
   }
 
   async function excluirListaCentral(listaId: number) {
-    if (!confirm("Deseja remover esta lista do evento?")) {
+    if (!evento?.id || !canDeleteListRole(roleUsuario)) {
+      setMensagemLista("Somente administradores podem excluir listas.");
       return;
     }
 
-    const { error } = await supabase.from("listas_evento").delete().eq("id", listaId);
+    if (
+      !confirm(
+        "Deseja excluir esta lista definitivamente? Esta ação é exclusiva de administradores e não poderá ser desfeita."
+      )
+    ) {
+      return;
+    }
 
-    if (error) {
-      console.error("Erro ao excluir lista:", error);
-      setMensagemLista("Não foi possível excluir a lista. Tente novamente.");
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      setMensagemLista("Sua sessão expirou. Faça login novamente.");
+      return;
+    }
+
+    const response = await fetch("/api/admin/listas", {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        eventoId: evento.id,
+        listaId,
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || result.error) {
+      console.error("Erro ao excluir lista:", result);
+      setMensagemLista(result.error || "Não foi possível excluir a lista. Tente novamente.");
       return;
     }
 
     setListasEvento((prev) => prev.filter((lista) => lista.id !== listaId));
+
     if (listaEditandoId === listaId) {
       setListaEditandoId(null);
       setListaNome("");
@@ -522,6 +568,8 @@ export default function EventoDashboard() {
       setListaAtiva(true);
       setMostrarCriarLista(false);
     }
+
+    setMensagemLista("Lista excluída com sucesso.");
   }
 
   async function atualizarCheckinParticipante(id: number, action: "checkin" | "undo-checkin") {
@@ -1066,9 +1114,7 @@ const desempenhoListas = listasEvento
     );
   }
 
-  const podeExcluirEvento =
-    isAdminRole(roleUsuario) ||
-    (roleUsuario === "produtor" && Boolean(usuarioId) && String(evento.criador_id) === String(usuarioId));
+  const podeExcluirEvento = canDeleteEventRole(roleUsuario);
   const podeExportarParticipantes = canExportParticipantsRole(roleUsuario);
 
   return (
@@ -1130,28 +1176,28 @@ const desempenhoListas = listasEvento
 
 <div className="flex gap-3 mt-5 flex-wrap justify-center w-full px-2">
 
-  {(canEditEventRole(roleUsuario)) && (
-    <>
-      <Link
-        href={`/admin/eventos/${evento.slug}/editar`}
-        className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-2xl font-bold transition min-h-11"
-      >
-        Editar Evento
-      </Link>
+  {canEditEventRole(roleUsuario) ? (
+    <Link
+      href={`/admin/eventos/${evento.slug}/editar`}
+      className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-2xl font-bold transition min-h-11"
+    >
+      Editar Evento
+    </Link>
+  ) : null}
 
-      <button
-        type="button"
-        onClick={abrirCriacaoLista}
-        className="bg-blue-800 hover:bg-blue-700 text-white px-5 py-3 rounded-2xl font-extrabold shadow-lg shadow-blue-200 transition min-h-11"
-      >
-        Criar Lista
-      </button>
-    </>
-  )}
+  {canCreateListRole(roleUsuario) ? (
+    <button
+      type="button"
+      onClick={abrirCriacaoLista}
+      className="bg-blue-800 hover:bg-blue-700 text-white px-5 py-3 rounded-2xl font-extrabold shadow-lg shadow-blue-200 transition min-h-11"
+    >
+      Criar Lista
+    </button>
+  ) : null}
 
   {roleUsuario === "staff" && (
     <span className="bg-orange-100 text-orange-700 px-4 py-3 rounded-2xl font-semibold">
-      Acesso de check-in apenas
+      Acesso operacional: listas, participantes e check-in
     </span>
   )}
 
@@ -1176,7 +1222,7 @@ const desempenhoListas = listasEvento
 
       </section>
 
-      {(canEditEventRole(roleUsuario)) ? (
+      {podeExcluirEvento ? (
         <section className="rounded-3xl border border-red-200 bg-red-50/60 p-5 sm:p-6 shadow-sm">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -1195,11 +1241,6 @@ const desempenhoListas = listasEvento
             />
           </div>
 
-          {!podeExcluirEvento ? (
-            <p className="mt-3 text-sm font-semibold text-red-700">
-              Somente Administrador Geral ou produtor criador deste evento pode excluir.
-            </p>
-          ) : null}
         </section>
       ) : null}
 
@@ -1210,7 +1251,7 @@ const desempenhoListas = listasEvento
             <p className="mt-1 text-sm text-slate-500">Crie e abra listas diretamente da Central do Evento.</p>
           </div>
 
-          {(canEditEventRole(roleUsuario)) && !mostrarCriarLista ? (
+          {canCreateListRole(roleUsuario) && !mostrarCriarLista ? (
             <button
               type="button"
               onClick={abrirCriacaoLista}
@@ -1221,7 +1262,7 @@ const desempenhoListas = listasEvento
           ) : null}
         </div>
 
-        {(canEditEventRole(roleUsuario)) && mostrarCriarLista ? (
+        {mostrarCriarLista && (listaEditandoId ? canEditListRole(roleUsuario) : canCreateListRole(roleUsuario)) ? (
           <form onSubmit={salvarListaEvento} className="mt-5 rounded-3xl border border-blue-100 bg-blue-50/40 p-4 sm:p-5">
             <div className="space-y-4">
               <div>
@@ -1345,8 +1386,8 @@ const desempenhoListas = listasEvento
         ) : null}
 
         {roleUsuario === "staff" ? (
-          <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700">
-            Seu perfil possui acesso focado em check-in e nao permite criar listas.
+          <p className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700">
+            Staff pode criar listas e gerenciar participantes, mas não pode editar nem excluir listas.
           </p>
         ) : null}
 
@@ -1539,7 +1580,7 @@ const desempenhoListas = listasEvento
                       Abrir
                     </Link>
 
-                    {(canEditEventRole(roleUsuario)) ? (
+                    {canEditListRole(roleUsuario) ? (
 
                       <>
                         <button
@@ -1550,15 +1591,18 @@ const desempenhoListas = listasEvento
                           Editar
                         </button>
 
-                        <button
-                          type="button"
-                          onClick={() => void excluirListaCentral(lista.id)}
-                          className="inline-flex h-9 items-center justify-center rounded-lg border border-red-100 bg-red-50 px-3.5 text-xs font-bold text-red-600 transition hover:bg-red-100"
-                        >
-                          Excluir
-                        </button>
                       </>
 
+                    ) : null}
+
+                    {canDeleteListRole(roleUsuario) ? (
+                      <button
+                        type="button"
+                        onClick={() => void excluirListaCentral(lista.id)}
+                        className="inline-flex h-9 items-center justify-center rounded-lg border border-red-100 bg-red-50 px-3.5 text-xs font-bold text-red-600 transition hover:bg-red-100"
+                      >
+                        Excluir
+                      </button>
                     ) : null}
 
                     {listaPublicaAtivaComSlug ? (
@@ -1696,7 +1740,7 @@ const desempenhoListas = listasEvento
                 Abrir lista
               </Link>
 
-              {(canEditEventRole(roleUsuario)) ? (
+              {canEditListRole(roleUsuario) ? (
 
                 <button
                   type="button"
@@ -1721,7 +1765,7 @@ const desempenhoListas = listasEvento
 
               ) : null}
 
-              {(canEditEventRole(roleUsuario)) ? (
+              {canDeleteListRole(roleUsuario) ? (
 
                 <button
                   type="button"

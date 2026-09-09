@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { registrarAuditLog } from "@/lib/auditoria";
 import { classificarParticipante } from "@/lib/inteligencia";
-import { canEditEventRole, isAdminRole, resolverRoleUsuario, type RoleUsuario } from "@/lib/roles";
+import { canManageParticipantsRole, isAdminRole, resolverRoleUsuario, type RoleUsuario } from "@/lib/roles";
 import { erroEhDuplicidadeParticipante, normalizarNomeParticipante } from "@/lib/participantes";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
@@ -99,7 +99,7 @@ export async function POST(request: Request) {
       return authResult.response;
     }
 
-    if (!canEditEventRole(authResult.usuario.role)) {
+    if (!canManageParticipantsRole(authResult.usuario.role)) {
       return NextResponse.json({ error: "Usuario sem permissao para cadastrar participantes." }, { status: 403 });
     }
 
@@ -283,6 +283,10 @@ export async function PATCH(request: Request) {
       return authResult.response;
     }
 
+    if (!canManageParticipantsRole(authResult.usuario.role)) {
+      return NextResponse.json({ error: "Usuario sem permissao para atualizar participantes." }, { status: 403 });
+    }
+
     const body = (await request.json()) as {
       participanteId?: number;
       eventoId?: number;
@@ -368,6 +372,10 @@ export async function DELETE(request: Request) {
     const authResult = await autenticarUsuario(request);
     if (!authResult.ok) {
       return authResult.response;
+    }
+
+    if (!canManageParticipantsRole(authResult.usuario.role)) {
+      return NextResponse.json({ error: "Usuario sem permissao para excluir participantes." }, { status: 403 });
     }
 
     const body = (await request.json()) as {

@@ -38,15 +38,72 @@ export function isPlatformOwner(role: string | null | undefined) {
 
 export function isAdminRole(role: string | null | undefined) {
   const roleResolvido = resolverRoleUsuario(role);
-  return roleResolvido === "platform_owner" || roleResolvido === "super_admin";
+
+  return (
+    roleResolvido === "platform_owner" ||
+    roleResolvido === "super_admin"
+  );
+}
+
+export function canCreateEventRole(role: string | null | undefined) {
+  return (
+    isAdminRole(role) ||
+    resolverRoleUsuario(role) === "produtor"
+  );
 }
 
 export function canEditEventRole(role: string | null | undefined) {
-  return isAdminRole(role) || resolverRoleUsuario(role) === "produtor";
+  return canCreateEventRole(role);
+}
+
+export function canDeleteEventRole(role: string | null | undefined) {
+  return isAdminRole(role);
+}
+
+export function canCreateListRole(role: string | null | undefined) {
+  const roleResolvido = resolverRoleUsuario(role);
+
+  return (
+    isAdminRole(role) ||
+    roleResolvido === "produtor" ||
+    roleResolvido === "staff"
+  );
+}
+
+export function canEditListRole(role: string | null | undefined) {
+  return (
+    isAdminRole(role) ||
+    resolverRoleUsuario(role) === "produtor"
+  );
+}
+
+export function canDeleteListRole(role: string | null | undefined) {
+  return isAdminRole(role);
+}
+
+export function canManageParticipantsRole(role: string | null | undefined) {
+  const roleResolvido = resolverRoleUsuario(role);
+
+  return (
+    isAdminRole(role) ||
+    roleResolvido === "produtor" ||
+    roleResolvido === "staff"
+  );
 }
 
 export function canCheckinRole(role: string | null | undefined) {
-  return canEditEventRole(role) || resolverRoleUsuario(role) === "staff";
+  return canManageParticipantsRole(role);
+}
+
+export function canManageEventProducersRole(role: string | null | undefined) {
+  return isAdminRole(role);
+}
+
+export function canManageEventStaffRole(role: string | null | undefined) {
+  return (
+    isAdminRole(role) ||
+    resolverRoleUsuario(role) === "produtor"
+  );
 }
 
 export function canExportParticipantsRole(role: string | null | undefined) {

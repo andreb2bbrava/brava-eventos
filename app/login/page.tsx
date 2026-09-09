@@ -50,7 +50,7 @@ export default function LoginPage() {
     }
 
     if (usuario?.role === "staff") {
-      router.push("/staff");
+      router.push("/admin");
       return;
     }
 
