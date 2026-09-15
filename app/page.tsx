@@ -4,6 +4,7 @@ const eventosMock = [
   {
     id: 1,
     nome: "Brava Stage Festival",
+    slug: "brava-stage-festival",
     data: "12 SET",
     local: "Vitória - ES",
     preco: "A partir de R$ 50",
@@ -13,6 +14,7 @@ const eventosMock = [
   {
     id: 2,
     nome: "Samba In Caza",
+    slug: "samba-in-caza",
     data: "20 SET",
     local: "Vila Velha - ES",
     preco: "A partir de R$ 45",
@@ -22,6 +24,7 @@ const eventosMock = [
   {
     id: 3,
     nome: "Baile da Favorita",
+    slug: "baile-da-favorita",
     data: "04 OUT",
     local: "Serra - ES",
     preco: "A partir de R$ 60",
@@ -128,7 +131,7 @@ export default function Home() {
               </p>
 
               <Link
-                href="#eventos"
+                href="/ingressos/brava-stage-festival"
                 className="mt-5 inline-flex rounded-xl bg-white px-5 py-3 text-sm font-black text-slate-950"
               >
                 Comprar ingresso
@@ -193,7 +196,10 @@ export default function Home() {
               key={evento.id}
               className="group overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-xl"
             >
-              <div className="relative overflow-hidden">
+              <Link
+                href={`/ingressos/${evento.slug}`}
+                className="relative block overflow-hidden"
+              >
                 <img
                   src={evento.imagem}
                   alt={evento.nome}
@@ -212,7 +218,7 @@ export default function Home() {
                 <div className="absolute right-4 top-4 rounded-full bg-slate-950/85 px-3 py-1 text-xs font-bold text-white backdrop-blur">
                   🎟️ Ingressos
                 </div>
-              </div>
+              </Link>
 
               <div className="p-6">
                 <p className="text-sm font-semibold text-slate-500">
@@ -228,12 +234,12 @@ export default function Home() {
                 </p>
 
                 <div className="mt-6 grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-extrabold text-white transition hover:bg-blue-500"
+                  <Link
+                    href={`/ingressos/${evento.slug}`}
+                    className="inline-flex items-center justify-center rounded-2xl bg-blue-600 px-4 py-3 text-sm font-extrabold text-white transition hover:bg-blue-500"
                   >
                     Comprar
-                  </button>
+                  </Link>
 
                   <Link
                     href="/listas"
