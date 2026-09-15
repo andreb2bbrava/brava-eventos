@@ -229,7 +229,7 @@ export default function EventoDashboard() {
 
   async function carregarListas(eventoId: number, podeCorrigirSlugLegado: boolean, role: string | null) {
     const selectComPixel = "*";
-    const selectSemPixel = "id,nome,tipo_lista,tipo_visibilidade,visibilidade,regra,ativa,slug,created_at";
+    const selectSemPixel = "id,nome,tipo_lista,tipo_visibilidade,regra,ativa,slug,created_at";
 
     const consultaBase = supabase.from("listas_evento");
 
