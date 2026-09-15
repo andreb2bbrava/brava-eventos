@@ -325,30 +325,6 @@ export default function EventoDashboard() {
 
       setListaMetaPixelInvalido(false);
 
-      const nomeNormalizado = normalizarNomeLista(listaNome);
-
-      const { data: listasMesmoEvento, error: erroBuscaDuplicidade } = await supabase
-        .from("listas_evento")
-        .select("id, nome")
-        .eq("evento_id", evento.id);
-
-      if (erroBuscaDuplicidade) {
-        console.error("Erro ao validar duplicidade de lista:", erroBuscaDuplicidade);
-        setMensagemLista("Não foi possível criar a lista. Verifique os dados e tente novamente.");
-        return;
-      }
-
-      const duplicada = (listasMesmoEvento || []).some((listaExistente) => {
-        const mesmoNome = normalizarNomeLista(listaExistente.nome || "") === nomeNormalizado;
-        const mesmaLista = listaEditandoId && listaExistente.id === listaEditandoId;
-        return mesmoNome && !mesmaLista;
-      });
-
-      if (duplicada) {
-        setMensagemLista("Já existe uma lista com esse nome neste evento.");
-        return;
-      }
-
       const editandoLista = Boolean(listaEditandoId);
 
       if (editandoLista && !canEditListRole(roleUsuario)) {
@@ -372,16 +348,10 @@ export default function EventoDashboard() {
 
       const listaAtual = listaEditandoId ? listasEvento.find((item) => item.id === listaEditandoId) : null;
       const slugExistente = (listaAtual?.slug || "").trim();
-      const precisaGerarSlug = !slugExistente;
 
-      const slugGerado = precisaGerarSlug
-        ? (await gerarSlugUnicoLista({
-            supabase,
-            titulo: listaNome,
-            eventoId: evento.id,
-            listaIdAtual: listaEditandoId,
-          })) || null
-        : slugExistente;
+      // Para criação, a API é responsável por validar duplicidade e gerar/validar o slug.
+      // Isso evita que Staff dependa de consultas diretas à tabela listas_evento no navegador.
+      const slugGerado = listaEditandoId ? slugExistente || null : null;
 
       const payload: Record<string, unknown> = {
         evento_id: evento.id,
