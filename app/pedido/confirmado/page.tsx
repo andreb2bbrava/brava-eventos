@@ -2,7 +2,65 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useMemo } from "react";
+import {
+  Suspense,
+  useEffect,
+  useState,
+} from "react";
+
+type EventoPedido = {
+  id: number;
+  nome: string;
+  slug: string;
+  data_evento: string | null;
+  hora_evento: string | null;
+  local_evento: string | null;
+  inicio_evento: string | null;
+};
+
+type ItemPedido = {
+  id: number;
+  tipoIngressoId: number;
+  loteId: number;
+  quantidade: number;
+  valorUnitario: number;
+  valorTotal: number;
+  tipoIngresso: {
+    id: number;
+    nome: string;
+  };
+  lote: {
+    id: number;
+    nome: string;
+  };
+};
+
+type Pedido = {
+  id: number;
+  codigo: string;
+  eventoId: number;
+  comprador: {
+    nome: string;
+    email: string;
+    cpf: string | null;
+    telefone: string | null;
+  };
+  subtotal: number;
+  taxa: number;
+  total: number;
+  status: string;
+  formaPagamento: string | null;
+  pagoEm: string | null;
+  createdAt: string;
+  quantidade: number;
+  evento: EventoPedido;
+  itens: ItemPedido[];
+};
+
+type RespostaPedido = {
+  pedido?: Pedido;
+  error?: string;
+};
 
 function moeda(valor: number) {
   return valor.toLocaleString("pt-BR", {
@@ -11,11 +69,28 @@ function moeda(valor: number) {
   });
 }
 
+function formatarData(evento: EventoPedido) {
+  if (evento.inicio_evento) {
+    const data = new Date(evento.inicio_evento);
+
+    if (!Number.isNaN(data.getTime())) {
+      return data.toLocaleDateString("pt-BR", {
+        day: "2-digit",
+        month: "long",
+        year: "numeric",
+      });
+    }
+  }
+
+  return evento.data_evento || "Data a definir";
+}
+
 function CarregandoPedido() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4 text-slate-900">
       <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-xl">
         <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600" />
+
         <p className="mt-4 font-bold text-slate-600">
           Carregando pedido...
         </p>
@@ -27,32 +102,110 @@ function CarregandoPedido() {
 function PedidoConfirmadoContent() {
   const searchParams = useSearchParams();
 
-  const evento =
-    searchParams.get("evento")?.trim() || "brava-stage-festival";
+  const pedidoId = searchParams.get("pedido")?.trim() || "";
+  const codigo = searchParams.get("codigo")?.trim() || "";
 
-  const nome = searchParams.get("nome")?.trim() || "Comprador";
+  const [pedido, setPedido] = useState<Pedido | null>(null);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState("");
 
-  const ingressos = useMemo(() => {
-    const valor = Number(searchParams.get("ingressos") || 0);
+  useEffect(() => {
+    let ativo = true;
 
-    if (!Number.isFinite(valor)) {
-      return 0;
+    async function carregarPedido() {
+      setCarregando(true);
+      setErro("");
+
+      if (!pedidoId || !codigo) {
+        if (ativo) {
+          setErro("Pedido não informado.");
+          setCarregando(false);
+        }
+
+        return;
+      }
+
+      try {
+        const resposta = await fetch(
+          `/api/tiketeira/pedidos/${encodeURIComponent(
+            pedidoId
+          )}?codigo=${encodeURIComponent(codigo)}`,
+          {
+            cache: "no-store",
+          }
+        );
+
+        const dados = (await resposta.json()) as RespostaPedido;
+
+        if (!resposta.ok || !dados.pedido) {
+          throw new Error(
+            dados.error || "Não foi possível consultar o pedido."
+          );
+        }
+
+        if (ativo) {
+          setPedido(dados.pedido);
+        }
+      } catch (error) {
+        console.error("Erro ao consultar pedido:", error);
+
+        if (ativo) {
+          setPedido(null);
+          setErro(
+            error instanceof Error
+              ? error.message
+              : "Não foi possível consultar o pedido."
+          );
+        }
+      } finally {
+        if (ativo) {
+          setCarregando(false);
+        }
+      }
     }
 
-    return Math.max(0, Math.trunc(valor));
-  }, [searchParams]);
+    carregarPedido();
 
-  const total = useMemo(() => {
-    const valor = Number(searchParams.get("total") || 0);
+    return () => {
+      ativo = false;
+    };
+  }, [pedidoId, codigo]);
 
-    if (!Number.isFinite(valor)) {
-      return 0;
-    }
+  if (carregando) {
+    return <CarregandoPedido />;
+  }
 
-    return Math.max(0, valor);
-  }, [searchParams]);
+  if (erro || !pedido) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4">
+        <div className="w-full max-w-xl rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-xl">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-50 text-3xl">
+            ⚠️
+          </div>
 
-  const primeiroNome = nome.split(" ")[0] || "Comprador";
+          <h1 className="mt-5 text-3xl font-black text-slate-950">
+            Pedido não encontrado
+          </h1>
+
+          <p className="mt-3 text-slate-500">
+            {erro || "Não foi possível localizar este pedido."}
+          </p>
+
+          <Link
+            href="/"
+            className="mt-7 inline-flex min-h-12 items-center justify-center rounded-2xl bg-blue-600 px-6 font-black text-white transition hover:bg-blue-500"
+          >
+            Voltar para eventos
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  const primeiroNome =
+    pedido.comprador.nome.split(" ")[0] || "Comprador";
+
+  const pedidoPago = pedido.status === "pago";
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900">
@@ -81,19 +234,15 @@ function PedidoConfirmadoContent() {
               1. Ingressos
             </span>
 
-            <span className="text-slate-300">
-              →
-            </span>
+            <span className="text-slate-300">→</span>
 
             <span className="text-slate-400">
               2. Identificação
             </span>
 
-            <span className="text-slate-300">
-              →
-            </span>
+            <span className="text-slate-300">→</span>
 
-            <span className="text-emerald-600">
+            <span className="text-blue-600">
               3. Pedido
             </span>
           </div>
@@ -102,20 +251,30 @@ function PedidoConfirmadoContent() {
 
       <section className="border-b border-slate-800 bg-slate-950">
         <div className="mx-auto max-w-6xl px-4 py-10 text-center sm:px-6 sm:py-14">
-          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-emerald-500 text-4xl text-white shadow-lg shadow-emerald-950/30">
-            ✓
+          <div
+            className={`mx-auto flex h-20 w-20 items-center justify-center rounded-full text-4xl text-white shadow-lg ${
+              pedidoPago
+                ? "bg-emerald-500 shadow-emerald-950/30"
+                : "bg-blue-600 shadow-blue-950/30"
+            }`}
+          >
+            {pedidoPago ? "✓" : "⌛"}
           </div>
 
-          <p className="mt-6 text-xs font-black uppercase tracking-[0.22em] text-emerald-400">
-            Pedido gerado
+          <p className="mt-6 text-xs font-black uppercase tracking-[0.22em] text-blue-400">
+            {pedidoPago ? "Pagamento confirmado" : "Pedido criado"}
           </p>
 
           <h1 className="mt-3 text-3xl font-black text-white sm:text-5xl">
-            Tudo certo, {primeiroNome}!
+            {pedidoPago
+              ? `Tudo certo, ${primeiroNome}!`
+              : `Pedido recebido, ${primeiroNome}!`}
           </h1>
 
           <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-slate-400 sm:text-lg">
-            Seu pedido para o Brava Stage Festival foi criado com sucesso.
+            {pedidoPago
+              ? "Seu pagamento foi confirmado."
+              : "Seu pedido foi registrado com sucesso. Agora falta a confirmação do pagamento para liberar os ingressos."}
           </p>
         </div>
       </section>
@@ -130,17 +289,32 @@ function PedidoConfirmadoContent() {
                 </p>
 
                 <h2 className="mt-2 text-2xl font-black text-slate-950 sm:text-3xl">
-                  Brava Stage Festival
+                  {pedido.evento.nome}
                 </h2>
 
                 <p className="mt-2 text-sm text-slate-500">
-                  12 de setembro de 2026 • Vitória - ES
+                  {formatarData(pedido.evento)}
+                  {" • "}
+                  {pedido.evento.local_evento || "Local a definir"}
+                </p>
+
+                <p className="mt-2 text-sm text-slate-500">
+                  Código do pedido:{" "}
+                  <span className="font-black text-slate-700">
+                    {pedido.codigo}
+                  </span>
                 </p>
               </div>
 
-              <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">
-                ✓ Pedido confirmado
-              </div>
+              {pedidoPago ? (
+                <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">
+                  ✓ Pagamento confirmado
+                </div>
+              ) : (
+                <div className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-black text-amber-700">
+                  ⏳ Aguardando pagamento
+                </div>
+              )}
             </div>
           </div>
 
@@ -151,7 +325,11 @@ function PedidoConfirmadoContent() {
               </p>
 
               <p className="mt-2 text-lg font-black text-slate-950">
-                {nome}
+                {pedido.comprador.nome}
+              </p>
+
+              <p className="mt-1 text-sm text-slate-500">
+                {pedido.comprador.email}
               </p>
             </div>
 
@@ -161,8 +339,59 @@ function PedidoConfirmadoContent() {
               </p>
 
               <p className="mt-2 text-lg font-black text-slate-950">
-                {ingressos} ingresso{ingressos !== 1 ? "s" : ""}
+                {pedido.quantidade} ingresso
+                {pedido.quantidade !== 1 ? "s" : ""}
               </p>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">
+                Pedido
+              </p>
+
+              <p className="mt-2 text-lg font-black text-slate-950">
+                #{pedido.id}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">
+                Forma de pagamento
+              </p>
+
+              <p className="mt-2 text-lg font-black uppercase text-slate-950">
+                {pedido.formaPagamento || "—"}
+              </p>
+            </div>
+          </div>
+
+          <div className="border-t border-slate-100 px-6 py-6 sm:px-8">
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">
+              Itens do pedido
+            </p>
+
+            <div className="mt-4 space-y-3">
+              {pedido.itens.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between gap-4 rounded-2xl bg-slate-50 p-4"
+                >
+                  <div>
+                    <p className="font-black text-slate-950">
+                      {item.tipoIngresso.nome}
+                    </p>
+
+                    <p className="mt-1 text-sm text-slate-500">
+                      {item.lote.nome} • {item.quantidade} ×{" "}
+                      {moeda(item.valorUnitario)}
+                    </p>
+                  </div>
+
+                  <p className="font-black text-slate-950">
+                    {moeda(item.valorTotal)}
+                  </p>
+                </div>
+              ))}
             </div>
           </div>
 
@@ -174,48 +403,57 @@ function PedidoConfirmadoContent() {
                 </p>
 
                 <p className="mt-1 text-xs text-slate-400">
-                  Pagamento demonstrativo via PIX
+                  {pedidoPago
+                    ? "Pagamento confirmado"
+                    : "Pagamento pendente via PIX"}
                 </p>
               </div>
 
               <p className="text-3xl font-black text-slate-950">
-                {moeda(total)}
+                {moeda(pedido.total)}
               </p>
             </div>
           </div>
         </div>
 
-        <div className="mt-6 rounded-3xl border border-blue-100 bg-blue-50 p-6 sm:p-8">
-          <div className="flex items-start gap-4">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-xl text-white">
-              🎟️
-            </div>
+        {!pedidoPago ? (
+          <div className="mt-6 rounded-3xl border border-amber-200 bg-amber-50 p-6 sm:p-8">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-500 text-xl text-white">
+                ⏳
+              </div>
 
-            <div>
-              <h3 className="text-lg font-black text-slate-950">
-                E os ingressos?
-              </h3>
+              <div>
+                <h3 className="text-lg font-black text-slate-950">
+                  Aguardando pagamento
+                </h3>
 
-              <p className="mt-2 text-sm leading-relaxed text-slate-600">
-                Na versão definitiva da Tiketeira, após a confirmação do
-                pagamento os ingressos digitais serão liberados e ficarão
-                disponíveis para o comprador acessar pelo celular.
-              </p>
+                <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                  Seu pedido já está registrado. Os ingressos serão liberados
+                  somente depois que o pagamento for confirmado.
+                </p>
+              </div>
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="mt-6 rounded-3xl border border-emerald-200 bg-emerald-50 p-6 sm:p-8">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-xl text-white">
+                🎟️
+              </div>
 
-        <div className="mt-6 rounded-3xl border border-dashed border-slate-300 bg-white p-6 text-center sm:p-8">
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">
-            Ambiente de demonstração
-          </p>
+              <div>
+                <h3 className="text-lg font-black text-slate-950">
+                  Pagamento confirmado
+                </h3>
 
-          <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-slate-500">
-            Este pedido é apenas uma demonstração da experiência de compra.
-            Nenhuma cobrança foi realizada e nenhum pedido foi gravado no
-            sistema.
-          </p>
-        </div>
+                <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                  O pagamento deste pedido foi confirmado.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
           <Link
@@ -226,7 +464,7 @@ function PedidoConfirmadoContent() {
           </Link>
 
           <Link
-            href={`/ingressos/${evento}`}
+            href={`/ingressos/${pedido.evento.slug}`}
             className="inline-flex min-h-14 items-center justify-center rounded-2xl border border-slate-300 bg-white px-7 font-black text-slate-700 transition hover:bg-slate-50"
           >
             Ver evento

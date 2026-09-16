@@ -4,57 +4,115 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
+type UsuarioLogin = {
+  id: string;
+  role: string | null;
+  acesso_listas: boolean | null;
+  acesso_tiketeira: boolean | null;
+};
+
 export default function LoginPage() {
   const router = useRouter();
 
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
+  const [entrando, setEntrando] = useState(false);
 
   async function handleLogin(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password: senha,
-    });
-
-    if (error) {
-      console.log("ERRO LOGIN:", error);
-      alert("Email ou senha inválidos.");
+    if (entrando) {
       return;
     }
 
-    const user = data.user;
+    setEntrando(true);
 
-    const {
-      data: usuario,
-      error: erroUsuario,
-    } = await supabase.from("usuarios").select("*").eq("id", user.id).single();
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password: senha,
+      });
 
-    console.log("USUARIO:", usuario);
-    console.log("ERRO USUARIO:", erroUsuario);
+      if (error) {
+        console.warn("Login recusado:", error.message);
+        alert("Email ou senha inválidos.");
+        return;
+      }
 
-    if (usuario?.role === "platform_owner") {
-      router.push("/super-admin");
-      return;
+      const user = data.user;
+
+      if (!user) {
+        alert("Não foi possível identificar o usuário.");
+        return;
+      }
+
+      const { data: usuarioData, error: erroUsuario } = await supabase
+        .from("usuarios")
+        .select("id, role, acesso_listas, acesso_tiketeira")
+        .eq("id", user.id)
+        .single();
+
+      if (erroUsuario || !usuarioData) {
+        console.warn(
+          "Não foi possível carregar as permissões do usuário:",
+          erroUsuario?.message
+        );
+
+        alert("Não foi possível carregar as permissões do usuário.");
+        return;
+      }
+
+      const usuario = usuarioData as UsuarioLogin;
+
+      const acessoListas = usuario.acesso_listas === true;
+      const acessoTiketeira = usuario.acesso_tiketeira === true;
+
+      /*
+       * REGRA DE ENTRADA POR MÓDULO
+       *
+       * LISTAS + TIKETEIRA
+       * → Central de escolha
+       *
+       * SOMENTE LISTAS
+       * → Ambiente operacional atual
+       *
+       * SOMENTE TIKETEIRA
+       * → Dashboard da Tiketeira
+       *
+       * NENHUM MÓDULO
+       * → Sem acesso
+       */
+
+      if (acessoListas && acessoTiketeira) {
+        router.replace("/admin/modulos");
+        return;
+      }
+
+      if (acessoListas) {
+        router.replace("/admin");
+        return;
+      }
+
+      if (acessoTiketeira) {
+        router.replace("/admin/tiketeira");
+        return;
+      }
+
+      await supabase.auth.signOut();
+
+      alert("Usuário sem acesso aos módulos da plataforma.");
+    } catch (error) {
+      const mensagem =
+        error instanceof Error
+          ? error.message
+          : "Erro inesperado durante o login.";
+
+      console.warn("Falha inesperada no login:", mensagem);
+
+      alert("Ocorreu um erro ao entrar. Tente novamente.");
+    } finally {
+      setEntrando(false);
     }
-
-    if (usuario?.role === "super_admin") {
-      router.push("/super-admin");
-      return;
-    }
-
-    if (usuario?.role === "produtor") {
-      router.push("/admin");
-      return;
-    }
-
-    if (usuario?.role === "staff") {
-      router.push("/admin");
-      return;
-    }
-
-    alert("Usuário sem permissão.");
   }
 
   return (
@@ -68,9 +126,13 @@ export default function LoginPage() {
           />
         </div>
 
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-center text-blue-900 mb-2">GRUPO BRAVA</h1>
+        <h1 className="text-3xl sm:text-4xl font-extrabold text-center text-blue-900 mb-2">
+          GRUPO BRAVA
+        </h1>
 
-        <p className="text-center text-slate-500 mb-8">Painel Administrativo</p>
+        <p className="text-center text-slate-500 mb-8">
+          Painel Administrativo
+        </p>
 
         <form onSubmit={handleLogin} className="space-y-5">
           <input
@@ -79,6 +141,9 @@ export default function LoginPage() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             className="ui-field"
+            required
+            autoComplete="email"
+            disabled={entrando}
           />
 
           <input
@@ -87,13 +152,17 @@ export default function LoginPage() {
             value={senha}
             onChange={(e) => setSenha(e.target.value)}
             className="ui-field"
+            required
+            autoComplete="current-password"
+            disabled={entrando}
           />
 
           <button
             type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-500 text-white transition p-4 rounded-xl font-extrabold"
+            disabled={entrando}
+            className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-blue-300 disabled:cursor-not-allowed text-white transition p-4 rounded-xl font-extrabold"
           >
-            ENTRAR
+            {entrando ? "ENTRANDO..." : "ENTRAR"}
           </button>
         </form>
       </div>
