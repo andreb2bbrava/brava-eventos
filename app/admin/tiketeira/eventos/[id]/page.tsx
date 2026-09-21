@@ -450,12 +450,12 @@ export default function EventoTiketeiraPage() {
             Ingressos & Lotes
           </Link>
 
-          <button
-            disabled
-            className="whitespace-nowrap rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-400"
+          <Link
+            href={`/admin/tiketeira/eventos/${evento.id}/financeiro`}
+            className="whitespace-nowrap rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-600 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
           >
             Financeiro
-          </button>
+          </Link>
         </section>
 
         {/* KPIS */}
