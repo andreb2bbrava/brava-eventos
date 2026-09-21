@@ -511,21 +511,19 @@ export default function TiketeiraAdminPage() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled
-              className="inline-flex min-h-11 cursor-not-allowed items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-400"
+            <Link
+              href={`/admin/tiketeira/eventos/${evento.id}/pedidos`}
+              className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-600 transition hover:bg-slate-50"
             >
               Pedidos
-            </button>
+            </Link>
 
-            <button
-              type="button"
-              disabled
-              className="inline-flex min-h-11 cursor-not-allowed items-center justify-center rounded-2xl bg-violet-700 px-5 py-3 text-sm font-bold text-white opacity-60"
+            <Link
+              href={`/admin/tiketeira/eventos/${evento.id}/ingressos`}
+              className="inline-flex min-h-11 items-center justify-center rounded-2xl bg-violet-700 px-5 py-3 text-sm font-bold text-white transition hover:bg-violet-600"
             >
               Ingressos & Lotes
-            </button>
+            </Link>
           </div>
         </section>
 

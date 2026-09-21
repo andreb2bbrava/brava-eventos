@@ -383,6 +383,7 @@ export async function GET(request: NextRequest) {
         tipo_ingresso_id: tipo.id,
         nome: tipo.nome,
         descricao: tipo.descricao,
+        ativo: tipo.ativo,
         capacidade,
         vendidos,
         pendentes,

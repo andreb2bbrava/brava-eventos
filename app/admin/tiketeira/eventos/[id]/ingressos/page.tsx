@@ -27,6 +27,7 @@ type TipoPerformance = {
   tipo_ingresso_id: number;
   nome: string;
   descricao: string | null;
+  ativo: boolean;
   capacidade: number;
   vendidos: number;
   pendentes: number;
@@ -79,6 +80,14 @@ export default function IngressosEventoTiketeiraPage() {
   const [descricaoNovoTipo, setDescricaoNovoTipo] = useState("");
   const [salvandoTipo, setSalvandoTipo] = useState(false);
 
+  // EDITAR / STATUS DO TIPO
+
+  const [tipoEditando, setTipoEditando] = useState<number | null>(null);
+  const [nomeTipoEditando, setNomeTipoEditando] = useState("");
+  const [descricaoTipoEditando, setDescricaoTipoEditando] = useState("");
+  const [salvandoEdicaoTipo, setSalvandoEdicaoTipo] = useState(false);
+  const [alterandoStatusTipo, setAlterandoStatusTipo] = useState<number | null>(null);
+
   // NOVO LOTE
 
   const [tipoNovoLote, setTipoNovoLote] = useState<number | null>(
@@ -93,6 +102,17 @@ export default function IngressosEventoTiketeiraPage() {
   const [inicioNovoLote, setInicioNovoLote] = useState("");
   const [fimNovoLote, setFimNovoLote] = useState("");
   const [salvandoLote, setSalvandoLote] = useState(false);
+
+  // EDITAR / STATUS DO LOTE
+
+  const [loteEditando, setLoteEditando] = useState<number | null>(null);
+  const [nomeLoteEditando, setNomeLoteEditando] = useState("");
+  const [precoLoteEditando, setPrecoLoteEditando] = useState("");
+  const [quantidadeLoteEditando, setQuantidadeLoteEditando] = useState("");
+  const [inicioLoteEditando, setInicioLoteEditando] = useState("");
+  const [fimLoteEditando, setFimLoteEditando] = useState("");
+  const [salvandoEdicaoLote, setSalvandoEdicaoLote] = useState(false);
+  const [alterandoStatusLote, setAlterandoStatusLote] = useState<number | null>(null);
 
   // MENSAGENS
 
@@ -286,6 +306,148 @@ export default function IngressosEventoTiketeiraPage() {
     setMensagemOperacao("");
   }
 
+  // EDITAR / ATIVAR / DESATIVAR TIPO
+
+  function abrirEdicaoTipo(tipo: TipoPerformance) {
+    setTipoEditando(tipo.tipo_ingresso_id);
+    setNomeTipoEditando(tipo.nome);
+    setDescricaoTipoEditando(tipo.descricao || "");
+    setMensagemOperacao("");
+    setMensagemSucesso("");
+  }
+
+  function cancelarEdicaoTipo() {
+    if (salvandoEdicaoTipo) return;
+    setTipoEditando(null);
+    setNomeTipoEditando("");
+    setDescricaoTipoEditando("");
+    setMensagemOperacao("");
+  }
+
+  async function salvarEdicaoTipo(tipoId: number) {
+    setMensagemOperacao("");
+    setMensagemSucesso("");
+
+    const nome = nomeTipoEditando.trim();
+
+    if (!nome) {
+      setMensagemOperacao("Informe o nome do tipo de ingresso.");
+      return;
+    }
+
+    setSalvandoEdicaoTipo(true);
+
+    try {
+      const session = await obterSessao();
+      if (!session) return;
+
+      const resposta = await fetch("/api/admin/tiketeira/ingressos", {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          acao: "editar_tipo",
+          evento_id: eventoId,
+          tipo_ingresso_id: tipoId,
+          nome,
+          descricao: descricaoTipoEditando.trim() || null,
+        }),
+      });
+
+      const json = await resposta.json();
+
+      if (!resposta.ok) {
+        throw new Error(
+          json?.error || "Não foi possível atualizar o tipo de ingresso."
+        );
+      }
+
+      setTipoEditando(null);
+      setNomeTipoEditando("");
+      setDescricaoTipoEditando("");
+      setMensagemSucesso(json?.message || "Tipo de ingresso atualizado.");
+      await carregarDashboard(false);
+    } catch (error) {
+      setMensagemOperacao(
+        error instanceof Error
+          ? error.message
+          : "Erro inesperado ao atualizar o tipo de ingresso."
+      );
+    } finally {
+      setSalvandoEdicaoTipo(false);
+    }
+  }
+
+  async function alterarStatusTipo(tipo: TipoPerformance) {
+    setMensagemOperacao("");
+    setMensagemSucesso("");
+
+    const novoStatus = !tipo.ativo;
+
+    const confirmou = window.confirm(
+      `${novoStatus ? "Ativar" : "Desativar"} "${tipo.nome}"?\n\n` +
+        (novoStatus
+          ? "O ingresso voltará a ficar disponível para venda conforme seus lotes ativos."
+          : "O ingresso permanecerá no histórico, mas ficará indisponível para venda.")
+    );
+
+    if (!confirmou) return;
+
+    setAlterandoStatusTipo(tipo.tipo_ingresso_id);
+
+    try {
+      const session = await obterSessao();
+      if (!session) return;
+
+      const resposta = await fetch("/api/admin/tiketeira/ingressos", {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          acao: "alterar_status_tipo",
+          evento_id: eventoId,
+          tipo_ingresso_id: tipo.tipo_ingresso_id,
+          ativo: novoStatus,
+        }),
+      });
+
+      const json = await resposta.json();
+
+      if (!resposta.ok) {
+        throw new Error(
+          json?.error || "Não foi possível alterar o status do tipo de ingresso."
+        );
+      }
+
+      if (tipoEditando === tipo.tipo_ingresso_id) {
+        setTipoEditando(null);
+        setNomeTipoEditando("");
+        setDescricaoTipoEditando("");
+      }
+
+      setMensagemSucesso(
+        json?.message ||
+          (novoStatus
+            ? "Tipo de ingresso ativado."
+            : "Tipo de ingresso desativado.")
+      );
+
+      await carregarDashboard(false);
+    } catch (error) {
+      setMensagemOperacao(
+        error instanceof Error
+          ? error.message
+          : "Erro inesperado ao alterar o status do tipo de ingresso."
+      );
+    } finally {
+      setAlterandoStatusTipo(null);
+    }
+  }
+
   // NOVO LOTE
 
   function abrirNovoLote(tipoId: number) {
@@ -423,6 +585,193 @@ export default function IngressosEventoTiketeiraPage() {
       );
     } finally {
       setSalvandoLote(false);
+    }
+  }
+
+  // EDITAR / ATIVAR / DESATIVAR LOTE
+
+  function abrirEdicaoLote(lote: LotePerformance) {
+    setLoteEditando(lote.lote_id);
+    setNomeLoteEditando(lote.nome);
+    setPrecoLoteEditando(String(lote.preco).replace(".", ","));
+    setQuantidadeLoteEditando(String(lote.capacidade));
+    setInicioLoteEditando("");
+    setFimLoteEditando("");
+    setMensagemOperacao("");
+    setMensagemSucesso("");
+  }
+
+  function cancelarEdicaoLote() {
+    if (salvandoEdicaoLote) return;
+
+    setLoteEditando(null);
+    setNomeLoteEditando("");
+    setPrecoLoteEditando("");
+    setQuantidadeLoteEditando("");
+    setInicioLoteEditando("");
+    setFimLoteEditando("");
+    setMensagemOperacao("");
+  }
+
+  async function salvarEdicaoLote(loteId: number) {
+    setMensagemOperacao("");
+    setMensagemSucesso("");
+
+    const nome = nomeLoteEditando.trim();
+    const preco = Number(precoLoteEditando.replace(",", "."));
+    const quantidade = Number(quantidadeLoteEditando);
+
+    if (!nome) {
+      setMensagemOperacao("Informe o nome do lote.");
+      return;
+    }
+
+    if (
+      !precoLoteEditando.trim() ||
+      !Number.isFinite(preco) ||
+      preco < 0
+    ) {
+      setMensagemOperacao("Informe um preço válido.");
+      return;
+    }
+
+    if (!Number.isInteger(quantidade) || quantidade <= 0) {
+      setMensagemOperacao(
+        "Informe uma quantidade válida maior que zero."
+      );
+      return;
+    }
+
+    if (
+      inicioLoteEditando &&
+      fimLoteEditando &&
+      new Date(fimLoteEditando).getTime() <=
+        new Date(inicioLoteEditando).getTime()
+    ) {
+      setMensagemOperacao(
+        "O fim das vendas deve ser posterior ao início."
+      );
+      return;
+    }
+
+    setSalvandoEdicaoLote(true);
+
+    try {
+      const session = await obterSessao();
+      if (!session) return;
+
+      const resposta = await fetch("/api/admin/tiketeira/ingressos", {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          acao: "editar_lote",
+          evento_id: eventoId,
+          lote_id: loteId,
+          nome,
+          preco,
+          quantidade_total: quantidade,
+          inicio_vendas: inicioLoteEditando || null,
+          fim_vendas: fimLoteEditando || null,
+        }),
+      });
+
+      const json = await resposta.json();
+
+      if (!resposta.ok) {
+        throw new Error(
+          json?.error || "Não foi possível atualizar o lote."
+        );
+      }
+
+      setLoteEditando(null);
+      setNomeLoteEditando("");
+      setPrecoLoteEditando("");
+      setQuantidadeLoteEditando("");
+      setInicioLoteEditando("");
+      setFimLoteEditando("");
+      setMensagemSucesso(json?.message || "Lote atualizado com sucesso.");
+
+      await carregarDashboard(false);
+    } catch (error) {
+      setMensagemOperacao(
+        error instanceof Error
+          ? error.message
+          : "Erro inesperado ao atualizar o lote."
+      );
+    } finally {
+      setSalvandoEdicaoLote(false);
+    }
+  }
+
+  async function alterarStatusLote(lote: LotePerformance) {
+    setMensagemOperacao("");
+    setMensagemSucesso("");
+
+    const novoStatus = !lote.ativo;
+
+    const confirmou = window.confirm(
+      `${novoStatus ? "Ativar" : "Desativar"} "${lote.nome}"?\n\n` +
+        (novoStatus
+          ? "O lote voltará a ficar disponível para venda conforme as demais regras."
+          : "O lote permanecerá no histórico, mas ficará indisponível para venda.")
+    );
+
+    if (!confirmou) return;
+
+    setAlterandoStatusLote(lote.lote_id);
+
+    try {
+      const session = await obterSessao();
+      if (!session) return;
+
+      const resposta = await fetch("/api/admin/tiketeira/ingressos", {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          acao: "alterar_status_lote",
+          evento_id: eventoId,
+          lote_id: lote.lote_id,
+          ativo: novoStatus,
+        }),
+      });
+
+      const json = await resposta.json();
+
+      if (!resposta.ok) {
+        throw new Error(
+          json?.error || "Não foi possível alterar o status do lote."
+        );
+      }
+
+      if (loteEditando === lote.lote_id) {
+        setLoteEditando(null);
+        setNomeLoteEditando("");
+        setPrecoLoteEditando("");
+        setQuantidadeLoteEditando("");
+        setInicioLoteEditando("");
+        setFimLoteEditando("");
+      }
+
+      setMensagemSucesso(
+        json?.message ||
+          (novoStatus ? "Lote ativado." : "Lote desativado.")
+      );
+
+      await carregarDashboard(false);
+    } catch (error) {
+      setMensagemOperacao(
+        error instanceof Error
+          ? error.message
+          : "Erro inesperado ao alterar o status do lote."
+      );
+    } finally {
+      setAlterandoStatusLote(null);
     }
   }
 
@@ -885,7 +1234,53 @@ export default function IngressosEventoTiketeiraPage() {
                         ) : null}
                       </div>
 
-                      <div className="grid grid-cols-3 gap-3">
+                      <div className="flex flex-col gap-3">
+                        <div className="flex flex-wrap justify-start gap-2 lg:justify-end">
+                          <span
+                            className={`inline-flex min-h-10 items-center rounded-xl px-4 py-2 text-xs font-extrabold ${
+                              tipo.ativo
+                                ? "bg-emerald-50 text-emerald-700"
+                                : "bg-slate-100 text-slate-500"
+                            }`}
+                          >
+                            {tipo.ativo ? "Ativo" : "Inativo"}
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={() => abrirEdicaoTipo(tipo)}
+                            disabled={
+                              tipoEditando !== null ||
+                              salvandoEdicaoTipo ||
+                              alterandoStatusTipo !== null
+                            }
+                            className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-extrabold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Editar
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => alterarStatusTipo(tipo)}
+                            disabled={
+                              salvandoEdicaoTipo ||
+                              alterandoStatusTipo !== null
+                            }
+                            className={`inline-flex min-h-10 items-center justify-center rounded-xl px-4 py-2 text-xs font-extrabold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                              tipo.ativo
+                                ? "border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+                                : "bg-emerald-600 text-white hover:bg-emerald-500"
+                            }`}
+                          >
+                            {alterandoStatusTipo === tipo.tipo_ingresso_id
+                              ? "Alterando..."
+                              : tipo.ativo
+                                ? "Desativar"
+                                : "Ativar"}
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-3">
                         <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-center">
                           <p className="text-xs font-bold text-emerald-700">
                             Vendidos
@@ -915,8 +1310,77 @@ export default function IngressosEventoTiketeiraPage() {
                             {tipo.disponiveis}
                           </p>
                         </div>
+                        </div>
                       </div>
                     </div>
+
+                    {tipoEditando === tipo.tipo_ingresso_id ? (
+                      <div className="mt-6 rounded-2xl border border-violet-200 bg-violet-50/50 p-5">
+                        <p className="text-xs font-extrabold uppercase tracking-[0.12em] text-violet-600">
+                          Editar ingresso
+                        </p>
+
+                        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                          <div>
+                            <label className="mb-2 block text-xs font-extrabold text-slate-600">
+                              Nome do ingresso *
+                            </label>
+                            <input
+                              type="text"
+                              value={nomeTipoEditando}
+                              onChange={(event) =>
+                                setNomeTipoEditando(event.target.value)
+                              }
+                              disabled={salvandoEdicaoTipo}
+                              maxLength={120}
+                              className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:bg-slate-50"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="mb-2 block text-xs font-extrabold text-slate-600">
+                              Descrição
+                            </label>
+                            <input
+                              type="text"
+                              value={descricaoTipoEditando}
+                              onChange={(event) =>
+                                setDescricaoTipoEditando(event.target.value)
+                              }
+                              disabled={salvandoEdicaoTipo}
+                              maxLength={250}
+                              className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:bg-slate-50"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                          <button
+                            type="button"
+                            onClick={cancelarEdicaoTipo}
+                            disabled={salvandoEdicaoTipo}
+                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-5 text-sm font-extrabold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            Cancelar
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              salvarEdicaoTipo(tipo.tipo_ingresso_id)
+                            }
+                            disabled={
+                              salvandoEdicaoTipo || !nomeTipoEditando.trim()
+                            }
+                            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-700 px-5 text-sm font-extrabold text-white transition hover:bg-violet-600 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {salvandoEdicaoTipo
+                              ? "Salvando..."
+                              : "Salvar alterações"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
 
                     <div className="mt-6">
                       <div className="mb-2 flex items-center justify-between gap-4 text-xs">
@@ -1187,16 +1651,174 @@ export default function IngressosEventoTiketeiraPage() {
                                   </p>
                                 </div>
 
-                                <div className="text-right">
-                                  <p className="text-xs font-bold text-slate-400">
-                                    Capacidade
-                                  </p>
+                                <div className="flex flex-col items-end gap-3">
+                                  <div className="text-right">
+                                    <p className="text-xs font-bold text-slate-400">
+                                      Capacidade
+                                    </p>
 
-                                  <p className="mt-1 text-xl font-black">
-                                    {lote.capacidade}
-                                  </p>
+                                    <p className="mt-1 text-xl font-black">
+                                      {lote.capacidade}
+                                    </p>
+                                  </div>
+
+                                  <div className="flex flex-wrap justify-end gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => abrirEdicaoLote(lote)}
+                                      disabled={
+                                        loteEditando !== null ||
+                                        salvandoEdicaoLote ||
+                                        alterandoStatusLote !== null
+                                      }
+                                      className="inline-flex min-h-9 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-extrabold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      Editar
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => alterarStatusLote(lote)}
+                                      disabled={
+                                        salvandoEdicaoLote ||
+                                        alterandoStatusLote !== null
+                                      }
+                                      className={`inline-flex min-h-9 items-center justify-center rounded-xl px-3 py-2 text-[11px] font-extrabold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                                        lote.ativo
+                                          ? "border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+                                          : "bg-emerald-600 text-white hover:bg-emerald-500"
+                                      }`}
+                                    >
+                                      {alterandoStatusLote === lote.lote_id
+                                        ? "Alterando..."
+                                        : lote.ativo
+                                          ? "Desativar"
+                                          : "Ativar"}
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
+
+                              {loteEditando === lote.lote_id ? (
+                                <div className="mt-5 rounded-2xl border border-violet-200 bg-violet-50/50 p-4">
+                                  <p className="text-xs font-extrabold uppercase tracking-[0.12em] text-violet-600">
+                                    Editar lote
+                                  </p>
+
+                                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                                    <div>
+                                      <label className="mb-2 block text-xs font-extrabold text-slate-600">
+                                        Nome do lote *
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={nomeLoteEditando}
+                                        onChange={(event) =>
+                                          setNomeLoteEditando(event.target.value)
+                                        }
+                                        disabled={salvandoEdicaoLote}
+                                        maxLength={120}
+                                        className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:bg-slate-50"
+                                      />
+                                    </div>
+
+                                    <div>
+                                      <label className="mb-2 block text-xs font-extrabold text-slate-600">
+                                        Preço *
+                                      </label>
+                                      <input
+                                        type="text"
+                                        inputMode="decimal"
+                                        value={precoLoteEditando}
+                                        onChange={(event) =>
+                                          setPrecoLoteEditando(event.target.value)
+                                        }
+                                        disabled={salvandoEdicaoLote}
+                                        className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:bg-slate-50"
+                                      />
+                                    </div>
+
+                                    <div>
+                                      <label className="mb-2 block text-xs font-extrabold text-slate-600">
+                                        Quantidade *
+                                      </label>
+                                      <input
+                                        type="number"
+                                        min="1"
+                                        step="1"
+                                        value={quantidadeLoteEditando}
+                                        onChange={(event) =>
+                                          setQuantidadeLoteEditando(event.target.value)
+                                        }
+                                        disabled={salvandoEdicaoLote}
+                                        className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:bg-slate-50"
+                                      />
+                                    </div>
+
+                                    <div>
+                                      <label className="mb-2 block text-xs font-extrabold text-slate-600">
+                                        Início das vendas
+                                      </label>
+                                      <input
+                                        type="datetime-local"
+                                        value={inicioLoteEditando}
+                                        onChange={(event) =>
+                                          setInicioLoteEditando(event.target.value)
+                                        }
+                                        disabled={salvandoEdicaoLote}
+                                        className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:bg-slate-50"
+                                      />
+                                    </div>
+
+                                    <div>
+                                      <label className="mb-2 block text-xs font-extrabold text-slate-600">
+                                        Fim das vendas
+                                      </label>
+                                      <input
+                                        type="datetime-local"
+                                        value={fimLoteEditando}
+                                        onChange={(event) =>
+                                          setFimLoteEditando(event.target.value)
+                                        }
+                                        disabled={salvandoEdicaoLote}
+                                        className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:bg-slate-50"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  <p className="mt-3 text-xs leading-5 text-slate-500">
+                                    Datas são opcionais. Se ficarem vazias ao salvar,
+                                    o lote ficará sem restrição de início/fim de vendas.
+                                  </p>
+
+                                  <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                                    <button
+                                      type="button"
+                                      onClick={cancelarEdicaoLote}
+                                      disabled={salvandoEdicaoLote}
+                                      className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-xs font-extrabold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+                                    >
+                                      Cancelar
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => salvarEdicaoLote(lote.lote_id)}
+                                      disabled={
+                                        salvandoEdicaoLote ||
+                                        !nomeLoteEditando.trim() ||
+                                        !precoLoteEditando.trim() ||
+                                        !quantidadeLoteEditando.trim()
+                                      }
+                                      className="inline-flex min-h-10 items-center justify-center rounded-xl bg-violet-700 px-4 text-xs font-extrabold text-white transition hover:bg-violet-600 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      {salvandoEdicaoLote
+                                        ? "Salvando..."
+                                        : "Salvar alterações"}
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : null}
 
                               <div className="mt-5 grid grid-cols-3 gap-2">
                                 <div className="rounded-xl bg-emerald-50 p-3">
