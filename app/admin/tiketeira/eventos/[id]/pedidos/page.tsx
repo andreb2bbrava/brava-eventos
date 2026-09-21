@@ -476,7 +476,7 @@ export default function PedidosEventoTiketeiraPage() {
         <section className="mt-6 flex gap-2 overflow-x-auto pb-1">
           <Link
             href={`/admin/tiketeira/eventos/${evento.id}`}
-            className="whitespace-nowrap rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-600"
+            className="whitespace-nowrap rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-600 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
           >
             Visão Geral
           </Link>
