@@ -1,39 +1,183 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-const eventosMock = [
-  {
-    id: 1,
-    nome: "Brava Stage Festival",
-    slug: "brava-stage-festival",
-    data: "12 SET",
-    local: "Vitória - ES",
-    preco: "A partir de R$ 50",
-    imagem:
-      "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=1200&q=80",
-  },
-  {
-    id: 2,
-    nome: "Samba In Caza",
-    slug: "samba-in-caza",
-    data: "20 SET",
-    local: "Vila Velha - ES",
-    preco: "A partir de R$ 45",
-    imagem:
-      "https://images.unsplash.com/photo-1501386761578-eac5c94b800a?auto=format&fit=crop&w=1200&q=80",
-  },
-  {
-    id: 3,
-    nome: "Baile da Favorita",
-    slug: "baile-da-favorita",
-    data: "04 OUT",
-    local: "Serra - ES",
-    preco: "A partir de R$ 60",
-    imagem:
-      "https://images.unsplash.com/photo-1521337581100-8ca9a73a5f79?auto=format&fit=crop&w=1200&q=80",
-  },
-];
+type EventoTiketeira = {
+  id: number;
+  nome: string;
+  slug: string;
+  descricao: string | null;
+  data_evento: string | null;
+  hora_evento: string | null;
+  local_evento: string | null;
+  banner_url: string | null;
+  menor_preco: number;
+};
+
+type EventosResponse = {
+  eventos?: EventoTiketeira[];
+  error?: string;
+};
+
+const imagemFallback =
+  "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=1400&q=85";
+
+function formatarMoeda(valor: number) {
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  }).format(valor);
+}
+
+function formatarData(data: string | null) {
+  if (!data) {
+    return {
+      dia: "--",
+      mes: "---",
+      completa: "Data a definir",
+    };
+  }
+
+  const partes = data.split("-");
+
+  if (partes.length !== 3) {
+    return {
+      dia: "--",
+      mes: "---",
+      completa: data,
+    };
+  }
+
+  const [ano, mes, dia] = partes;
+
+  const meses = [
+    "JAN",
+    "FEV",
+    "MAR",
+    "ABR",
+    "MAI",
+    "JUN",
+    "JUL",
+    "AGO",
+    "SET",
+    "OUT",
+    "NOV",
+    "DEZ",
+  ];
+
+  const nomesMeses = [
+    "janeiro",
+    "fevereiro",
+    "março",
+    "abril",
+    "maio",
+    "junho",
+    "julho",
+    "agosto",
+    "setembro",
+    "outubro",
+    "novembro",
+    "dezembro",
+  ];
+
+  const indiceMes = Number(mes) - 1;
+
+  return {
+    dia,
+    mes: meses[indiceMes] || "---",
+    completa:
+      indiceMes >= 0 && indiceMes <= 11
+        ? `${Number(dia)} de ${nomesMeses[indiceMes]} de ${ano}`
+        : data,
+  };
+}
+
+function formatarHora(hora: string | null) {
+  if (!hora) return "";
+
+  return hora.slice(0, 5);
+}
 
 export default function Home() {
+  const [eventos, setEventos] = useState<EventoTiketeira[]>([]);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState("");
+  const [busca, setBusca] = useState("");
+
+  useEffect(() => {
+    let ativo = true;
+
+    async function carregarEventos() {
+      try {
+        setCarregando(true);
+        setErro("");
+
+        const resposta = await fetch("/api/tiketeira/eventos", {
+          cache: "no-store",
+        });
+
+        const dados = (await resposta.json()) as EventosResponse;
+
+        if (!resposta.ok) {
+          throw new Error(
+            dados.error || "Não foi possível carregar os eventos."
+          );
+        }
+
+        if (!ativo) return;
+
+        setEventos(Array.isArray(dados.eventos) ? dados.eventos : []);
+      } catch (error) {
+        console.error("ERRO HOME TIKETEIRA:", error);
+
+        if (!ativo) return;
+
+        setErro(
+          error instanceof Error
+            ? error.message
+            : "Não foi possível carregar os eventos."
+        );
+      } finally {
+        if (ativo) {
+          setCarregando(false);
+        }
+      }
+    }
+
+    carregarEventos();
+
+    return () => {
+      ativo = false;
+    };
+  }, []);
+
+  const eventosFiltrados = useMemo(() => {
+    const termo = busca.trim().toLowerCase();
+
+    if (!termo) {
+      return eventos;
+    }
+
+    return eventos.filter((evento) => {
+      const texto = [
+        evento.nome,
+        evento.local_evento || "",
+        evento.descricao || "",
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      return texto.includes(termo);
+    });
+  }, [eventos, busca]);
+
+  const eventoDestaque = eventos[0] || null;
+
+  const dataDestaque = eventoDestaque
+    ? formatarData(eventoDestaque.data_evento)
+    : null;
+
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900">
       <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur">
@@ -49,7 +193,10 @@ export default function Home() {
               <p className="text-xs font-bold uppercase tracking-[0.22em] text-blue-700">
                 Brava
               </p>
-              <p className="text-lg font-black text-slate-950">Ingressos</p>
+
+              <p className="text-lg font-black text-slate-950">
+                Ingressos
+              </p>
             </div>
           </div>
 
@@ -85,12 +232,14 @@ export default function Home() {
 
             <h1 className="max-w-xl text-4xl font-black leading-tight text-white sm:text-5xl md:text-6xl">
               Viva o evento.
-              <span className="block text-blue-400">Comece pelo ingresso.</span>
+              <span className="block text-blue-400">
+                Comece pelo ingresso.
+              </span>
             </h1>
 
             <p className="mt-5 max-w-xl text-base leading-relaxed text-slate-300 sm:text-lg">
-              Encontre os melhores eventos, compre seus ingressos e acompanhe tudo
-              em um só lugar.
+              Encontre os melhores eventos, compre seus ingressos e acompanhe
+              tudo em um só lugar.
             </p>
 
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
@@ -110,34 +259,66 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-3xl border border-slate-800 bg-slate-900 shadow-2xl">
-            <img
-              src="https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?auto=format&fit=crop&w=1400&q=85"
-              alt="Evento em destaque"
-              className="h-[320px] w-full object-cover sm:h-[420px]"
-            />
-
-            <div className="p-6">
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-400">
-                Em destaque
+          {carregando ? (
+            <div className="flex min-h-[420px] items-center justify-center rounded-3xl border border-slate-800 bg-slate-900 shadow-2xl">
+              <p className="font-bold text-slate-400">
+                Carregando evento...
               </p>
-
-              <h2 className="mt-2 text-2xl font-black text-white">
-                Brava Stage Festival
-              </h2>
-
-              <p className="mt-2 text-sm text-slate-300">
-                Vitória • 12 de setembro
-              </p>
-
-              <Link
-                href="/ingressos/brava-stage-festival"
-                className="mt-5 inline-flex rounded-xl bg-white px-5 py-3 text-sm font-black text-slate-950"
-              >
-                Comprar ingresso
-              </Link>
             </div>
-          </div>
+          ) : eventoDestaque ? (
+            <div className="overflow-hidden rounded-3xl border border-slate-800 bg-slate-900 shadow-2xl">
+              <img
+                src={eventoDestaque.banner_url || imagemFallback}
+                alt={eventoDestaque.nome}
+                className="h-[320px] w-full object-cover sm:h-[420px]"
+              />
+
+              <div className="p-6">
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-400">
+                  Em destaque
+                </p>
+
+                <h2 className="mt-2 text-2xl font-black text-white">
+                  {eventoDestaque.nome}
+                </h2>
+
+                <p className="mt-2 text-sm text-slate-300">
+                  {eventoDestaque.local_evento || "Local a definir"}
+                  {dataDestaque ? ` • ${dataDestaque.completa}` : ""}
+                  {eventoDestaque.hora_evento
+                    ? ` • ${formatarHora(eventoDestaque.hora_evento)}`
+                    : ""}
+                </p>
+
+                <p className="mt-3 text-sm font-bold text-blue-300">
+                  A partir de {formatarMoeda(eventoDestaque.menor_preco)}
+                </p>
+
+                <Link
+                  href={`/ingressos/${eventoDestaque.slug}`}
+                  className="mt-5 inline-flex rounded-xl bg-white px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-blue-50"
+                >
+                  Comprar ingresso
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <div className="flex min-h-[420px] items-center justify-center rounded-3xl border border-slate-800 bg-slate-900 p-8 text-center shadow-2xl">
+              <div>
+                <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-400">
+                  Brava Ingressos
+                </p>
+
+                <h2 className="mt-3 text-2xl font-black text-white">
+                  Novos eventos em breve
+                </h2>
+
+                <p className="mt-3 text-sm text-slate-400">
+                  Aguarde as próximas vendas da Brava Entretenimento.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
@@ -155,22 +336,27 @@ export default function Home() {
               <input
                 id="busca"
                 type="text"
+                value={busca}
+                onChange={(event) => setBusca(event.target.value)}
                 placeholder="Qual evento você procura?"
                 className="min-h-12 flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-4 text-slate-900 outline-none transition focus:border-blue-500 focus:bg-white"
               />
 
-              <button
-                type="button"
-                className="min-h-12 rounded-2xl bg-blue-600 px-6 font-extrabold text-white transition hover:bg-blue-500"
+              <Link
+                href="#eventos"
+                className="inline-flex min-h-12 items-center justify-center rounded-2xl bg-blue-600 px-6 font-extrabold text-white transition hover:bg-blue-500"
               >
                 Buscar
-              </button>
+              </Link>
             </div>
           </div>
         </div>
       </section>
 
-      <section id="eventos" className="mx-auto max-w-7xl px-4 py-16 sm:px-6">
+      <section
+        id="eventos"
+        className="mx-auto max-w-7xl scroll-mt-24 px-4 py-16 sm:px-6"
+      >
         <div className="mb-8 flex items-end justify-between gap-4">
           <div>
             <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-700">
@@ -178,95 +364,120 @@ export default function Home() {
             </p>
 
             <h2 className="mt-2 text-3xl font-black text-slate-950">
-              Eventos em destaque
+              Eventos disponíveis
             </h2>
           </div>
-
-          <Link
-            href="/eventos"
-            className="hidden text-sm font-bold text-blue-700 hover:text-blue-500 sm:block"
-          >
-            Ver todos
-          </Link>
         </div>
 
-        <div className="grid gap-7 sm:grid-cols-2 lg:grid-cols-3">
-          {eventosMock.map((evento) => (
-            <article
-              key={evento.id}
-              className="group overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-xl"
-            >
-              <Link
-                href={`/ingressos/${evento.slug}`}
-                className="relative block overflow-hidden"
-              >
-                <img
-                  src={evento.imagem}
-                  alt={evento.nome}
-                  className="h-52 w-full object-cover transition duration-500 group-hover:scale-105"
-                />
+        {erro ? (
+          <div className="rounded-3xl border border-red-200 bg-red-50 p-6">
+            <p className="font-bold text-red-800">{erro}</p>
+          </div>
+        ) : carregando ? (
+          <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+            <p className="font-bold text-slate-500">
+              Carregando eventos...
+            </p>
+          </div>
+        ) : eventosFiltrados.length === 0 ? (
+          <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+            <p className="text-xl font-black text-slate-900">
+              Nenhum evento encontrado
+            </p>
 
-                <div className="absolute left-4 top-4 rounded-2xl bg-white px-3 py-2 text-center shadow-lg">
-                  <span className="block text-xs font-black text-blue-700">
-                    {evento.data.split(" ")[1]}
-                  </span>
-                  <span className="block text-xl font-black text-slate-950">
-                    {evento.data.split(" ")[0]}
-                  </span>
-                </div>
+            <p className="mt-2 text-sm text-slate-500">
+              {busca
+                ? "Tente pesquisar por outro nome ou local."
+                : "Não existem eventos com ingressos disponíveis no momento."}
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-7 sm:grid-cols-2 lg:grid-cols-3">
+            {eventosFiltrados.map((evento) => {
+              const data = formatarData(evento.data_evento);
 
-                <div className="absolute right-4 top-4 rounded-full bg-slate-950/85 px-3 py-1 text-xs font-bold text-white backdrop-blur">
-                  🎟️ Ingressos
-                </div>
-              </Link>
-
-              <div className="p-6">
-                <p className="text-sm font-semibold text-slate-500">
-                  {evento.local}
-                </p>
-
-                <h3 className="mt-2 text-2xl font-black text-slate-950">
-                  {evento.nome}
-                </h3>
-
-                <p className="mt-4 text-sm font-bold text-blue-700">
-                  {evento.preco}
-                </p>
-
-                <div className="mt-6 grid grid-cols-2 gap-3">
+              return (
+                <article
+                  key={evento.id}
+                  className="group overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-xl"
+                >
                   <Link
                     href={`/ingressos/${evento.slug}`}
-                    className="inline-flex items-center justify-center rounded-2xl bg-blue-600 px-4 py-3 text-sm font-extrabold text-white transition hover:bg-blue-500"
+                    className="relative block overflow-hidden"
                   >
-                    Comprar
+                    <img
+                      src={evento.banner_url || imagemFallback}
+                      alt={evento.nome}
+                      className="h-52 w-full object-cover transition duration-500 group-hover:scale-105"
+                    />
+
+                    <div className="absolute left-4 top-4 rounded-2xl bg-white px-3 py-2 text-center shadow-lg">
+                      <span className="block text-xs font-black text-blue-700">
+                        {data.mes}
+                      </span>
+
+                      <span className="block text-xl font-black text-slate-950">
+                        {data.dia}
+                      </span>
+                    </div>
+
+                    <div className="absolute right-4 top-4 rounded-full bg-slate-950/85 px-3 py-1 text-xs font-bold text-white backdrop-blur">
+                      🎟️ Ingressos
+                    </div>
                   </Link>
 
-                  <Link
-                    href="/listas"
-                    className="inline-flex items-center justify-center rounded-2xl border border-slate-200 px-4 py-3 text-sm font-extrabold text-slate-700 transition hover:bg-slate-50"
-                  >
-                    Ver listas
-                  </Link>
-                </div>
-              </div>
-            </article>
-          ))}
-        </div>
+                  <div className="p-6">
+                    <p className="text-sm font-semibold text-slate-500">
+                      {evento.local_evento || "Local a definir"}
+                      {evento.hora_evento
+                        ? ` • ${formatarHora(evento.hora_evento)}`
+                        : ""}
+                    </p>
 
-        <div className="mt-8 sm:hidden">
-          <Link
-            href="/eventos"
-            className="inline-flex w-full items-center justify-center rounded-2xl border border-slate-300 bg-white px-5 py-3 font-bold text-slate-700"
-          >
-            Ver todos os eventos
-          </Link>
-        </div>
+                    <h3 className="mt-2 text-2xl font-black text-slate-950">
+                      {evento.nome}
+                    </h3>
+
+                    {evento.descricao ? (
+                      <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-slate-500">
+                        {evento.descricao}
+                      </p>
+                    ) : null}
+
+                    <p className="mt-4 text-sm font-bold text-blue-700">
+                      A partir de {formatarMoeda(evento.menor_preco)}
+                    </p>
+
+                    <div className="mt-6 grid grid-cols-2 gap-3">
+                      <Link
+                        href={`/ingressos/${evento.slug}`}
+                        className="inline-flex items-center justify-center rounded-2xl bg-blue-600 px-4 py-3 text-sm font-extrabold text-white transition hover:bg-blue-500"
+                      >
+                        Comprar
+                      </Link>
+
+                      <Link
+                        href="/listas"
+                        className="inline-flex items-center justify-center rounded-2xl border border-slate-200 px-4 py-3 text-sm font-extrabold text-slate-700 transition hover:bg-slate-50"
+                      >
+                        Ver listas
+                      </Link>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       <section className="border-t border-slate-200 bg-white">
         <div className="mx-auto grid max-w-7xl gap-8 px-4 py-12 sm:px-6 md:grid-cols-3">
           <div>
-            <p className="text-2xl font-black text-slate-950">Compra simples</p>
+            <p className="text-2xl font-black text-slate-950">
+              Compra simples
+            </p>
+
             <p className="mt-2 text-sm leading-relaxed text-slate-600">
               Escolha seu evento, seu ingresso e finalize em poucos passos.
             </p>
@@ -276,6 +487,7 @@ export default function Home() {
             <p className="text-2xl font-black text-slate-950">
               Ingresso digital
             </p>
+
             <p className="mt-2 text-sm leading-relaxed text-slate-600">
               Seu ingresso ficará disponível no celular para acesso ao evento.
             </p>
@@ -285,6 +497,7 @@ export default function Home() {
             <p className="text-2xl font-black text-slate-950">
               Tudo na Brava
             </p>
+
             <p className="mt-2 text-sm leading-relaxed text-slate-600">
               Ingressos, listas e gestão de eventos integrados em uma única
               plataforma.
@@ -302,7 +515,10 @@ export default function Home() {
               Listas
             </Link>
 
-            <Link href="/politica-de-privacidade" className="hover:text-white">
+            <Link
+              href="/politica-de-privacidade"
+              className="hover:text-white"
+            >
               Privacidade
             </Link>
 
