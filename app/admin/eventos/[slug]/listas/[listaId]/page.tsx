@@ -12,7 +12,13 @@ import {
   normalizarNomeParticipante,
   validarNomeCompletoParticipante,
 } from "@/lib/participantes";
-import { canEditEventRole, canCheckinRole, isAdminRole, resolverRoleUsuario, type RoleUsuario } from "@/lib/roles";
+import {
+  canCheckinRole,
+  canManageParticipantsRole,
+  isAdminRole,
+  resolverRoleUsuario,
+  type RoleUsuario,
+} from "@/lib/roles";
 
 type EventoResumo = {
   id: number;
@@ -393,7 +399,7 @@ export default function ParticipantesDaListaPage() {
     carregarDados();
   }, [carregarDados]);
 
-  const podeCadastrarParticipante = canEditEventRole(roleUsuario);
+  const podeCadastrarParticipante = canManageParticipantsRole(roleUsuario);
   const podeExcluirParticipante = canCheckinRole(roleUsuario);
 
   async function importarParticipantesSimples(e: FormEvent) {
