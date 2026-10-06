@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/limpeza-banners",
+      "schedule": "0 6 * * *"
+    }
+  ]
+}
